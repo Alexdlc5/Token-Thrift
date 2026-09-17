@@ -6,7 +6,8 @@ import { DatabaseSync } from 'node:sqlite'
 import { app } from 'electron'
 import { join } from 'node:path'
 
-const SCHEMA = `
+/** Exported so tests/scripts can apply it to a throwaway DatabaseSync without Electron's app object. */
+export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   provider_id TEXT NOT NULL,
