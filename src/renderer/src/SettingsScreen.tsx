@@ -83,6 +83,11 @@ function ProviderKeysCard({
         </div>
       )}
 
+      {providerId === 'cloudflare-workers-ai' && (
+        <p style={{ fontSize: 11, opacity: 0.6, marginTop: -4, marginBottom: 6 }}>
+          Needs two values — paste as <code>accountId:apiToken</code>
+        </p>
+      )}
       <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
         <input
           value={draftLabel}
@@ -95,7 +100,7 @@ function ProviderKeysCard({
           value={draftKey}
           onChange={(e) => setDraftKey(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && commitAdd()}
-          placeholder="API key"
+          placeholder={providerId === 'cloudflare-workers-ai' ? 'accountId:apiToken' : 'API key'}
           style={{ flex: 1, padding: 6, fontSize: 12 }}
         />
         <button onClick={commitAdd}>Save key</button>
