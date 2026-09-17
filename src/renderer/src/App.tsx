@@ -4,6 +4,7 @@ import Sidebar from './Sidebar'
 import ChatPane from './ChatPane'
 import SettingsScreen, { type ProviderSetting } from './SettingsScreen'
 import NewSessionPicker from './NewSessionPicker'
+import TaskMonitorPanel from './TaskMonitorPanel'
 import { DEFAULT_OVERRIDES } from './mockData'
 
 const ALL_PROVIDERS: ProviderId[] = [
@@ -31,6 +32,7 @@ export default function App(): React.JSX.Element {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [view, setView] = useState<View>('chat')
   const [showPicker, setShowPicker] = useState(false)
+  const [showMonitor, setShowMonitor] = useState(true)
   const [providerSettings, setProviderSettings] = useState<Record<ProviderId, ProviderSetting>>(
     emptyProviderSettings()
   )
@@ -165,7 +167,7 @@ export default function App(): React.JSX.Element {
       createdAt: Date.now()
     }
     setMessages((prev) => [...prev, optimisticUser])
-    window.api.sendMessage(sessionId, content).catch((err: unknown) => {
+    window.api.sendMessage(sessionId, content, activeOverrides).catch((err: unknown) => {
       setMessages((prev) => [
         ...prev,
         {
@@ -217,6 +219,9 @@ export default function App(): React.JSX.Element {
           <button onClick={() => setView('settings')} disabled={view === 'settings'}>
             Settings
           </button>
+          <button onClick={() => setShowMonitor((v) => !v)} style={{ marginLeft: 'auto' }}>
+            {showMonitor ? 'Hide monitor' : 'Show monitor'}
+          </button>
         </div>
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
           {view === 'chat' ? (
@@ -232,6 +237,7 @@ export default function App(): React.JSX.Element {
           )}
         </div>
       </div>
+      {showMonitor && <TaskMonitorPanel />}
       {showPicker && (
         <NewSessionPicker models={models} onPick={handlePickModel} onCancel={() => setShowPicker(false)} />
       )}

@@ -15,8 +15,9 @@ import {
   updateTask
 } from './db/repository'
 import { getProvider, listProviders } from './providers'
+import { buildSystemPrompt } from './prompt-modules'
 import { getAllowPaid, hasApiKey, setAllowPaid, setApiKey } from './secure-store'
-import type { TaskRow } from '@shared/models'
+import type { ModelOverrides, TaskRow } from '@shared/models'
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -51,7 +52,12 @@ function emitTaskUpdate(win: BrowserWindow | null, task: TaskRow): void {
 // Runs one provider streaming call to completion, persisting the assistant message and
 // task-log row and pushing live events to the renderer. Fire-and-forget from the IPC
 // handler's point of view — sendMessage() already returned the taskId by the time this runs.
-async function runChatTask(task: TaskRow, sessionId: string, win: BrowserWindow | null): Promise<void> {
+async function runChatTask(
+  task: TaskRow,
+  sessionId: string,
+  overrides: ModelOverrides | undefined,
+  win: BrowserWindow | null
+): Promise<void> {
   const session = getSession(sessionId)
   const provider = session && getProvider(session.providerId)
 
@@ -73,12 +79,20 @@ async function runChatTask(task: TaskRow, sessionId: string, win: BrowserWindow 
   emitTaskUpdate(win, updateTask(task.id, { status: 'streaming' }))
 
   const history = listMessages(sessionId).map((m) => ({ role: m.role, content: m.content }))
+  if (task.systemPrompt) history.unshift({ role: 'system', content: task.systemPrompt })
+
   let answer = ''
   let reasoning = ''
   let usage: { promptTokens: number; completionTokens: number } | undefined
 
   try {
-    for await (const part of provider.streamChat(history, { modelId: session.modelId })) {
+    for await (const part of provider.streamChat(history, {
+      modelId: session.modelId,
+      temperature: overrides?.temperature,
+      topP: overrides?.topP,
+      maxTokens: overrides?.maxTokens,
+      reasoningEffort: overrides?.reasoningEffort
+    })) {
       if (part.type === 'answer') {
         answer += part.delta
         win?.webContents.send(IPC.events.chatChunk, {
@@ -127,23 +141,27 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.session.archive, async (_e, id, archived) => setSessionArchived(id, archived))
 
   ipcMain.handle(IPC.message.list, async (_e, sessionId) => listMessages(sessionId))
-  ipcMain.handle(IPC.message.send, async (event, sessionId: string, content: string) => {
-    const session = getSession(sessionId)
-    if (!session) throw new Error(`Unknown session "${sessionId}"`)
+  ipcMain.handle(
+    IPC.message.send,
+    async (event, sessionId: string, content: string, overrides?: ModelOverrides) => {
+      const session = getSession(sessionId)
+      if (!session) throw new Error(`Unknown session "${sessionId}"`)
 
-    addMessage(sessionId, 'user', content)
-    const task = createTask({
-      parentTaskId: null,
-      sessionId,
-      providerId: session.providerId,
-      modelId: session.modelId
-    })
+      addMessage(sessionId, 'user', content)
+      const task = createTask({
+        parentTaskId: null,
+        sessionId,
+        providerId: session.providerId,
+        modelId: session.modelId,
+        systemPrompt: buildSystemPrompt(overrides)
+      })
 
-    const win = BrowserWindow.fromWebContents(event.sender)
-    void runChatTask(task, sessionId, win)
+      const win = BrowserWindow.fromWebContents(event.sender)
+      void runChatTask(task, sessionId, overrides, win)
 
-    return { taskId: task.id }
-  })
+      return { taskId: task.id }
+    }
+  )
 
   // allSettled, not all: most providers require an API key even to list models, so one
   // unconfigured provider (the common case before the user has pasted every key) must not

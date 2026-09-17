@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   cost_usd REAL NOT NULL DEFAULT 0,
   started_at INTEGER NOT NULL,
   ended_at INTEGER,
-  error TEXT
+  error TEXT,
+  system_prompt TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id);

@@ -81,6 +81,7 @@ interface TaskDbRow {
   started_at: number
   ended_at: number | null
   error: string | null
+  system_prompt: string | null
 }
 
 function mapTask(row: TaskDbRow): TaskRow {
@@ -96,7 +97,8 @@ function mapTask(row: TaskDbRow): TaskRow {
     costUsd: row.cost_usd,
     startedAt: row.started_at,
     endedAt: row.ended_at,
-    error: row.error
+    error: row.error,
+    systemPrompt: row.system_prompt
   }
 }
 
@@ -175,6 +177,7 @@ export interface CreateTaskInput {
   sessionId: string | null
   providerId: ProviderId
   modelId: string
+  systemPrompt?: string | null
 }
 
 export function createTask(input: CreateTaskInput): TaskRow {
@@ -190,13 +193,14 @@ export function createTask(input: CreateTaskInput): TaskRow {
     costUsd: 0,
     startedAt: Date.now(),
     endedAt: null,
-    error: null
+    error: null,
+    systemPrompt: input.systemPrompt ?? null
   }
   conn()
     .prepare(
       `INSERT INTO tasks
-         (id, parent_task_id, session_id, provider_id, model_id, status, prompt_tokens, completion_tokens, cost_usd, started_at, ended_at, error)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         (id, parent_task_id, session_id, provider_id, model_id, status, prompt_tokens, completion_tokens, cost_usd, started_at, ended_at, error, system_prompt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       task.id,
@@ -210,7 +214,8 @@ export function createTask(input: CreateTaskInput): TaskRow {
       task.costUsd,
       task.startedAt,
       task.endedAt,
-      task.error
+      task.error,
+      task.systemPrompt
     )
   return task
 }

@@ -52,6 +52,8 @@ export interface TaskRow {
   startedAt: number
   endedAt: number | null
   error: string | null
+  /** The resolved system prompt actually sent (custom prompt + active efficiency modules, §5), for inspection in the task monitor. */
+  systemPrompt: string | null
 }
 
 export interface ModelOverrides {

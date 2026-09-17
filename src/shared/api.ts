@@ -17,7 +17,11 @@ export interface TokenThriftApi {
   setSessionArchived(id: string, archived: boolean): Promise<void>
 
   listMessages(sessionId: string): Promise<ChatMessage[]>
-  sendMessage(sessionId: string, content: string): Promise<{ taskId: string }>
+  sendMessage(
+    sessionId: string,
+    content: string,
+    overrides?: ModelOverrides
+  ): Promise<{ taskId: string }>
 
   listModels(): Promise<ModelInfo[]>
   refreshFreeModels(): Promise<void>
