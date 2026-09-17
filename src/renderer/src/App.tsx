@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import type { ChatMessage, ModelInfo, ModelOverrides, ProviderId, SessionSummary } from '@shared/models'
+import type { ChatMessage, ModelInfo, ModelOverrides, ProviderId, SessionSummary, StoredKeyInfo } from '@shared/models'
 import Sidebar from './Sidebar'
 import ChatPane from './ChatPane'
-import SettingsScreen, { type ProviderSetting } from './SettingsScreen'
+import SettingsScreen from './SettingsScreen'
 import NewSessionPicker from './NewSessionPicker'
 import TaskMonitorPanel from './TaskMonitorPanel'
 import UsageTracker from './UsageTracker'
@@ -14,17 +14,17 @@ const ALL_PROVIDERS: ProviderId[] = [
   'google-ai-studio',
   'cerebras',
   'nvidia-nim',
-  'huggingface'
+  'huggingface',
+  'mistral',
+  'cloudflare-workers-ai'
 ]
 
-function emptyProviderSettings(): Record<ProviderId, ProviderSetting> {
-  return Object.fromEntries(ALL_PROVIDERS.map((id) => [id, { apiKey: '', allowPaid: false }])) as Record<
-    ProviderId,
-    ProviderSetting
-  >
+function emptyRecord<T>(fill: T): Record<ProviderId, T> {
+  return Object.fromEntries(ALL_PROVIDERS.map((id) => [id, fill])) as Record<ProviderId, T>
 }
 
 type View = 'chat' | 'settings'
+type PickerMode = 'new' | 'switch' | null
 
 export default function App(): React.JSX.Element {
   const [sessions, setSessions] = useState<SessionSummary[]>([])
@@ -32,10 +32,16 @@ export default function App(): React.JSX.Element {
   const [models, setModels] = useState<ModelInfo[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [view, setView] = useState<View>('chat')
-  const [showPicker, setShowPicker] = useState(false)
+  const [pickerMode, setPickerMode] = useState<PickerMode>(null)
   const [showMonitor, setShowMonitor] = useState(true)
-  const [providerSettings, setProviderSettings] = useState<Record<ProviderId, ProviderSetting>>(
-    emptyProviderSettings()
+  const [apiKeysByProvider, setApiKeysByProvider] = useState<Record<ProviderId, StoredKeyInfo[]>>(
+    emptyRecord<StoredKeyInfo[]>([])
+  )
+  const [activeKeyByProvider, setActiveKeyByProvider] = useState<Record<ProviderId, string | null>>(
+    emptyRecord<string | null>(null)
+  )
+  const [allowPaidByProvider, setAllowPaidByProvider] = useState<Record<ProviderId, boolean>>(
+    emptyRecord(false)
   )
   const [overridesBySession, setOverridesBySession] = useState<Record<string, ModelOverrides>>({})
 
@@ -50,21 +56,34 @@ export default function App(): React.JSX.Element {
     setMessages((prev) => [...prev.filter((m) => m.sessionId !== sessionId), ...next])
   }
 
-  // Initial load: sessions, models, and each provider's stored-key/allow-paid status.
+  function refreshProviderStatus(): void {
+    Promise.all(
+      ALL_PROVIDERS.map((id) =>
+        Promise.all([window.api.getProviderStatus(id), window.api.listApiKeys(id)])
+      )
+    )
+      .then((results) => {
+        const nextActive: Record<ProviderId, string | null> = emptyRecord<string | null>(null)
+        const nextAllowPaid: Record<ProviderId, boolean> = emptyRecord(false)
+        const nextKeys: Record<ProviderId, StoredKeyInfo[]> = emptyRecord<StoredKeyInfo[]>([])
+        ALL_PROVIDERS.forEach((id, i) => {
+          const [status, keys] = results[i]
+          nextActive[id] = status.activeKeyId
+          nextAllowPaid[id] = status.allowPaid
+          nextKeys[id] = keys
+        })
+        setActiveKeyByProvider(nextActive)
+        setAllowPaidByProvider(nextAllowPaid)
+        setApiKeysByProvider(nextKeys)
+      })
+      .catch(console.error)
+  }
+
+  // Initial load: sessions, models, and every provider's saved keys/allow-paid status.
   useEffect(() => {
     window.api.listSessions().then(setSessions).catch(console.error)
     window.api.listModels().then(setModels).catch(console.error)
-    Promise.all(ALL_PROVIDERS.map((id) => window.api.getProviderStatus(id)))
-      .then((statuses) => {
-        setProviderSettings((prev) => {
-          const next = { ...prev }
-          ALL_PROVIDERS.forEach((id, i) => {
-            next[id] = { apiKey: '', allowPaid: statuses[i].allowPaid }
-          })
-          return next
-        })
-      })
-      .catch(console.error)
+    refreshProviderStatus()
   }, [])
 
   // Load message history whenever the active session changes.
@@ -99,7 +118,8 @@ export default function App(): React.JSX.Element {
           role: 'assistant',
           content: evt.channel === 'answer' ? evt.delta : '',
           reasoning: evt.channel === 'reasoning' ? evt.delta : undefined,
-          createdAt: Date.now()
+          createdAt: Date.now(),
+          compressed: false
         }
         return [...prev, placeholder]
       })
@@ -120,7 +140,8 @@ export default function App(): React.JSX.Element {
           sessionId: evt.sessionId,
           role: 'system',
           content: `Error: ${evt.error}`,
-          createdAt: Date.now()
+          createdAt: Date.now(),
+          compressed: false
         }
       ])
     })
@@ -149,12 +170,29 @@ export default function App(): React.JSX.Element {
   }
 
   function handlePickModel(model: ModelInfo): void {
+    if (pickerMode === 'switch' && activeSessionId) {
+      window.api
+        .updateSessionModel(activeSessionId, model.providerId, model.modelId)
+        .then(() => {
+          setSessions((prev) =>
+            prev.map((s) =>
+              s.id === activeSessionId ? { ...s, providerId: model.providerId, modelId: model.modelId } : s
+            )
+          )
+          return window.api.listMessages(activeSessionId)
+        })
+        .then((msgs) => replaceSessionMessages(activeSessionId, msgs))
+        .catch(console.error)
+        .finally(() => setPickerMode(null))
+      return
+    }
+
     window.api
       .createSession(model.providerId, model.modelId, `New chat (${model.label})`)
       .then((session) => {
         setSessions((prev) => [session, ...prev])
         setActiveSessionId(session.id)
-        setShowPicker(false)
+        setPickerMode(null)
         setView('chat')
       })
       .catch(console.error)
@@ -168,7 +206,8 @@ export default function App(): React.JSX.Element {
       sessionId,
       role: 'user',
       content,
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      compressed: false
     }
     setMessages((prev) => [...prev, optimisticUser])
     window.api.sendMessage(sessionId, content, activeOverrides).catch((err: unknown) => {
@@ -179,20 +218,28 @@ export default function App(): React.JSX.Element {
           sessionId,
           role: 'system',
           content: `Error: ${err instanceof Error ? err.message : String(err)}`,
-          createdAt: Date.now()
+          createdAt: Date.now(),
+          compressed: false
         }
       ])
     })
   }
 
-  function handleUpdateProviderSetting(providerId: ProviderId, patch: Partial<ProviderSetting>): void {
-    setProviderSettings((prev) => ({ ...prev, [providerId]: { ...prev[providerId], ...patch } }))
-    if (patch.apiKey !== undefined) {
-      window.api.setProviderApiKey(providerId, patch.apiKey).catch(console.error)
-    }
-    if (patch.allowPaid !== undefined) {
-      window.api.setProviderAllowPaid(providerId, patch.allowPaid).catch(console.error)
-    }
+  function handleAddApiKey(providerId: ProviderId, label: string, apiKey: string): void {
+    window.api.addApiKey(providerId, label, apiKey).then(refreshProviderStatus).catch(console.error)
+  }
+
+  function handleRemoveApiKey(providerId: ProviderId, keyId: string): void {
+    window.api.removeApiKey(providerId, keyId).then(refreshProviderStatus).catch(console.error)
+  }
+
+  function handleSetActiveApiKey(providerId: ProviderId, keyId: string): void {
+    window.api.setActiveApiKey(providerId, keyId).then(refreshProviderStatus).catch(console.error)
+  }
+
+  function handleSetAllowPaid(providerId: ProviderId, allow: boolean): void {
+    setAllowPaidByProvider((prev) => ({ ...prev, [providerId]: allow }))
+    window.api.setProviderAllowPaid(providerId, allow).catch(console.error)
   }
 
   function handleUpdateOverrides(patch: Partial<ModelOverrides>): void {
@@ -213,16 +260,19 @@ export default function App(): React.JSX.Element {
         onSelect={handleSelectSession}
         onRename={handleRenameSession}
         onToggleArchive={handleToggleArchive}
-        onNewSession={() => setShowPicker(true)}
+        onNewSession={() => setPickerMode('new')}
       />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ display: 'flex', gap: 4, padding: 8, borderBottom: '1px solid #333' }}>
+        <div style={{ display: 'flex', gap: 4, padding: 8, borderBottom: '1px solid #333', alignItems: 'center' }}>
           <button onClick={() => setView('chat')} disabled={view === 'chat'}>
             Chat
           </button>
           <button onClick={() => setView('settings')} disabled={view === 'settings'}>
             Settings
           </button>
+          {view === 'chat' && activeSession && (
+            <button onClick={() => setPickerMode('switch')}>Switch model</button>
+          )}
           <button onClick={() => setShowMonitor((v) => !v)} style={{ marginLeft: 'auto' }}>
             {showMonitor ? 'Hide monitor' : 'Show monitor'}
           </button>
@@ -239,8 +289,13 @@ export default function App(): React.JSX.Element {
             <ChatPane session={activeSession} messages={activeMessages} onSend={handleSend} />
           ) : (
             <SettingsScreen
-              providerSettings={providerSettings}
-              onUpdateProviderSetting={handleUpdateProviderSetting}
+              apiKeysByProvider={apiKeysByProvider}
+              activeKeyByProvider={activeKeyByProvider}
+              allowPaidByProvider={allowPaidByProvider}
+              onAddApiKey={handleAddApiKey}
+              onRemoveApiKey={handleRemoveApiKey}
+              onSetActiveApiKey={handleSetActiveApiKey}
+              onSetAllowPaid={handleSetAllowPaid}
               activeSession={activeSession}
               overrides={activeOverrides}
               onUpdateOverrides={handleUpdateOverrides}
@@ -249,8 +304,8 @@ export default function App(): React.JSX.Element {
         </div>
       </div>
       {showMonitor && <TaskMonitorPanel />}
-      {showPicker && (
-        <NewSessionPicker models={models} onPick={handlePickModel} onCancel={() => setShowPicker(false)} />
+      {pickerMode && (
+        <NewSessionPicker models={models} onPick={handlePickModel} onCancel={() => setPickerMode(null)} />
       )}
     </div>
   )

@@ -6,7 +6,8 @@ export const IPC = {
     list: 'session:list',
     create: 'session:create',
     rename: 'session:rename',
-    archive: 'session:archive'
+    archive: 'session:archive',
+    updateModel: 'session:updateModel'
   },
   message: {
     list: 'message:list',
@@ -17,9 +18,12 @@ export const IPC = {
     refreshFree: 'model:refreshFree'
   },
   provider: {
-    setApiKey: 'provider:setApiKey',
     getStatus: 'provider:getStatus',
-    setAllowPaid: 'provider:setAllowPaid'
+    setAllowPaid: 'provider:setAllowPaid',
+    listApiKeys: 'provider:listApiKeys',
+    addApiKey: 'provider:addApiKey',
+    removeApiKey: 'provider:removeApiKey',
+    setActiveApiKey: 'provider:setActiveApiKey'
   },
   overrides: {
     get: 'overrides:get',

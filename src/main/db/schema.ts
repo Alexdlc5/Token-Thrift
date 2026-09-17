@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS messages (
   role TEXT NOT NULL,
   content TEXT NOT NULL,
   reasoning TEXT,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  compressed INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 

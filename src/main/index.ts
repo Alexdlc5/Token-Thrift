@@ -8,15 +8,28 @@ import {
   createTask,
   getSession,
   listMessages,
+  listMessagesForModel,
   listSessions,
   listTasks,
   renameSession,
   setSessionArchived,
+  updateSessionModel,
   updateTask
 } from './db/repository'
 import { getProvider, listProviders } from './providers'
 import { buildSystemPrompt } from './prompt-modules'
-import { getAllowPaid, hasApiKey, setAllowPaid, setApiKey } from './secure-store'
+import { fitHistoryToBudget } from './context-window'
+import { maybeCompressSession } from './context-compression'
+import {
+  addApiKey,
+  getActiveKeyId,
+  getAllowPaid,
+  hasApiKey,
+  listApiKeys,
+  removeApiKey,
+  setActiveApiKey,
+  setAllowPaid
+} from './secure-store'
 import type { ModelOverrides, TaskRow } from '@shared/models'
 
 function createWindow(): void {
@@ -78,7 +91,17 @@ async function runChatTask(
 
   emitTaskUpdate(win, updateTask(task.id, { status: 'streaming' }))
 
-  const history = listMessages(sessionId).map((m) => ({ role: m.role, content: m.content }))
+  // Fit this request to the active model's real budget — a session's history can run up to
+  // SESSION_TOKEN_CAP tokens (compressed as it grows, see context-compression.ts), but any
+  // one model's actual context window is usually much smaller than that.
+  const modelInfo = (await provider.listModels().catch(() => [])).find(
+    (m) => m.modelId === session.modelId
+  )
+  const contextLength = modelInfo?.contextLength ?? 32_768
+  const reserve = overrides?.maxTokens ?? Math.floor(contextLength * 0.25)
+  const budget = Math.max(1000, contextLength - reserve)
+
+  const history = fitHistoryToBudget(listMessagesForModel(sessionId), budget)
   if (task.systemPrompt) history.unshift({ role: 'system', content: task.systemPrompt })
 
   let answer = ''
@@ -124,6 +147,10 @@ async function runChatTask(
     })
     emitTaskUpdate(win, done)
     win?.webContents.send(IPC.events.chatDone, { taskId: task.id, sessionId })
+
+    // Fire-and-forget: doesn't block the response the user is already reading, and any
+    // failure (no summarizer configured, the call itself errors) just skips this round.
+    void maybeCompressSession(sessionId, session.providerId, session.modelId).catch(console.error)
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
     const failed = updateTask(task.id, { status: 'error', endedAt: Date.now(), error })
@@ -139,6 +166,10 @@ function registerIpcHandlers(): void {
   )
   ipcMain.handle(IPC.session.rename, async (_e, id, title) => renameSession(id, title))
   ipcMain.handle(IPC.session.archive, async (_e, id, archived) => setSessionArchived(id, archived))
+  ipcMain.handle(IPC.session.updateModel, async (_e, id, providerId, modelId) => {
+    updateSessionModel(id, providerId, modelId)
+    addMessage(id, 'system', `[Switched to ${providerId} / ${modelId}]`)
+  })
 
   ipcMain.handle(IPC.message.list, async (_e, sessionId) => listMessages(sessionId))
   ipcMain.handle(
@@ -174,15 +205,24 @@ function registerIpcHandlers(): void {
     await Promise.allSettled(listProviders().map((p) => p.listModels({ forceRefresh: true })))
   })
 
-  ipcMain.handle(IPC.provider.setApiKey, async (_e, providerId, apiKey) =>
-    setApiKey(providerId, apiKey)
-  )
   ipcMain.handle(IPC.provider.getStatus, async (_e, providerId) => ({
     hasApiKey: hasApiKey(providerId),
-    allowPaid: getAllowPaid(providerId)
+    allowPaid: getAllowPaid(providerId),
+    activeKeyId: getActiveKeyId(providerId)
   }))
   ipcMain.handle(IPC.provider.setAllowPaid, async (_e, providerId, allow) =>
     setAllowPaid(providerId, allow)
+  )
+
+  ipcMain.handle(IPC.provider.listApiKeys, async (_e, providerId) => listApiKeys(providerId))
+  ipcMain.handle(IPC.provider.addApiKey, async (_e, providerId, label, apiKey) =>
+    addApiKey(providerId, label, apiKey)
+  )
+  ipcMain.handle(IPC.provider.removeApiKey, async (_e, providerId, keyId) =>
+    removeApiKey(providerId, keyId)
+  )
+  ipcMain.handle(IPC.provider.setActiveApiKey, async (_e, providerId, keyId) =>
+    setActiveApiKey(providerId, keyId)
   )
 
   // Per-model overrides (§2.5) aren't persisted yet — no phase in the delegation plan owns

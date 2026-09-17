@@ -16,6 +16,8 @@ const api: TokenThriftApi = {
     ipcRenderer.invoke(IPC.session.create, providerId, modelId, title),
   renameSession: (id, title) => ipcRenderer.invoke(IPC.session.rename, id, title),
   setSessionArchived: (id, archived) => ipcRenderer.invoke(IPC.session.archive, id, archived),
+  updateSessionModel: (id, providerId, modelId) =>
+    ipcRenderer.invoke(IPC.session.updateModel, id, providerId, modelId),
 
   listMessages: (sessionId) => ipcRenderer.invoke(IPC.message.list, sessionId),
   sendMessage: (sessionId, content, overrides) =>
@@ -24,11 +26,16 @@ const api: TokenThriftApi = {
   listModels: () => ipcRenderer.invoke(IPC.model.list),
   refreshFreeModels: () => ipcRenderer.invoke(IPC.model.refreshFree),
 
-  setProviderApiKey: (providerId, apiKey) =>
-    ipcRenderer.invoke(IPC.provider.setApiKey, providerId, apiKey),
   getProviderStatus: (providerId) => ipcRenderer.invoke(IPC.provider.getStatus, providerId),
   setProviderAllowPaid: (providerId, allow) =>
     ipcRenderer.invoke(IPC.provider.setAllowPaid, providerId, allow),
+
+  listApiKeys: (providerId) => ipcRenderer.invoke(IPC.provider.listApiKeys, providerId),
+  addApiKey: (providerId, label, apiKey) =>
+    ipcRenderer.invoke(IPC.provider.addApiKey, providerId, label, apiKey),
+  removeApiKey: (providerId, keyId) => ipcRenderer.invoke(IPC.provider.removeApiKey, providerId, keyId),
+  setActiveApiKey: (providerId, keyId) =>
+    ipcRenderer.invoke(IPC.provider.setActiveApiKey, providerId, keyId),
 
   getModelOverrides: (providerId, modelId) =>
     ipcRenderer.invoke(IPC.overrides.get, providerId, modelId),

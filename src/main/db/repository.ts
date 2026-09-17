@@ -55,6 +55,7 @@ interface MessageRow {
   content: string
   reasoning: string | null
   created_at: number
+  compressed: number
 }
 
 function mapMessage(row: MessageRow): ChatMessage {
@@ -64,7 +65,8 @@ function mapMessage(row: MessageRow): ChatMessage {
     role: row.role,
     content: row.content,
     reasoning: row.reasoning ?? undefined,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    compressed: row.compressed === 1
   }
 }
 
@@ -139,6 +141,11 @@ export function setSessionArchived(id: string, archived: boolean): void {
   conn().prepare(`UPDATE sessions SET archived = ? WHERE id = ?`).run(archived ? 1 : 0, id)
 }
 
+/** Switches a session to a different provider/model without touching its message history. */
+export function updateSessionModel(id: string, providerId: ProviderId, modelId: string): void {
+  conn().prepare(`UPDATE sessions SET provider_id = ?, model_id = ? WHERE id = ?`).run(providerId, modelId, id)
+}
+
 // ---- messages ----
 
 export function listMessages(sessionId: string): ChatMessage[] {
@@ -146,6 +153,20 @@ export function listMessages(sessionId: string): ChatMessage[] {
     .prepare(`SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC`)
     .all(sessionId) as unknown as MessageRow[]
   return rows.map(mapMessage)
+}
+
+/** Non-compressed messages only, in order — what actually gets sent to a provider. */
+export function listMessagesForModel(sessionId: string): ChatMessage[] {
+  const rows = conn()
+    .prepare(`SELECT * FROM messages WHERE session_id = ? AND compressed = 0 ORDER BY created_at ASC`)
+    .all(sessionId) as unknown as MessageRow[]
+  return rows.map(mapMessage)
+}
+
+export function markMessagesCompressed(ids: string[]): void {
+  if (ids.length === 0) return
+  const placeholders = ids.map(() => '?').join(', ')
+  conn().prepare(`UPDATE messages SET compressed = 1 WHERE id IN (${placeholders})`).run(...ids)
 }
 
 export function addMessage(
@@ -160,11 +181,12 @@ export function addMessage(
     role,
     content,
     reasoning,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    compressed: false
   }
   conn()
     .prepare(
-      `INSERT INTO messages (id, session_id, role, content, reasoning, created_at) VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO messages (id, session_id, role, content, reasoning, created_at, compressed) VALUES (?, ?, ?, ?, ?, ?, 0)`
     )
     .run(message.id, message.sessionId, message.role, message.content, reasoning ?? null, message.createdAt)
   return message

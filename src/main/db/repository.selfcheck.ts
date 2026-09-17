@@ -13,10 +13,13 @@ import {
   createTask,
   getTask,
   listMessages,
+  listMessagesForModel,
   listSessions,
   listTasks,
+  markMessagesCompressed,
   renameSession,
   setSessionArchived,
+  updateSessionModel,
   updateTask
 } from './repository'
 
@@ -49,6 +52,23 @@ assert.deepStrictEqual(
 ) // created_at ASC
 assert.strictEqual(messages[0].reasoning, undefined)
 assert.strictEqual(messages[1].reasoning, 'thought about it briefly')
+assert.strictEqual(messages[0].compressed, false)
+
+// compression: mark the user message compressed, add a summary in its place
+markMessagesCompressed([userMsg.id])
+assert.deepStrictEqual(
+  listMessagesForModel(session.id).map((m) => m.id),
+  [assistantMsg.id] // compressed one excluded
+)
+assert.strictEqual(
+  listMessages(session.id).length,
+  2 // still shown in full history for the UI
+)
+const summaryMsg = addMessage(session.id, 'system', '[summary]')
+assert.deepStrictEqual(
+  listMessagesForModel(session.id).map((m) => m.id),
+  [assistantMsg.id, summaryMsg.id]
+)
 
 // --- tasks ---
 
@@ -110,6 +130,13 @@ for (let i = 0; i + 1 < allTasks.length; i++) {
 setSessionArchived(session.id, true)
 const archived = listSessions().find((s) => s.id === session.id)
 assert.strictEqual(archived?.archived, true)
+
+// --- switch model ---
+
+updateSessionModel(session.id, 'openrouter', 'openrouter/free')
+const switched = listSessions().find((s) => s.id === session.id)
+assert.strictEqual(switched?.providerId, 'openrouter')
+assert.strictEqual(switched?.modelId, 'openrouter/free')
 
 _setDbForTesting(undefined)
 memoryDb.close()

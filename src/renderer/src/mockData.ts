@@ -8,7 +8,9 @@ export const PROVIDER_LABELS: Record<ProviderId, string> = {
   'google-ai-studio': 'Google AI Studio',
   cerebras: 'Cerebras',
   'nvidia-nim': 'NVIDIA NIM',
-  huggingface: 'Hugging Face'
+  huggingface: 'Hugging Face',
+  mistral: 'Mistral',
+  'cloudflare-workers-ai': 'Cloudflare Workers AI'
 }
 
 export const DEFAULT_OVERRIDES: ModelOverrides = {

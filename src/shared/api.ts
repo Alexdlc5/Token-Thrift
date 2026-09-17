@@ -6,6 +6,7 @@ import type {
   ProviderId,
   ProviderStatus,
   SessionSummary,
+  StoredKeyInfo,
   TaskRow
 } from './models'
 
@@ -15,6 +16,8 @@ export interface TokenThriftApi {
   createSession(providerId: ProviderId, modelId: string, title?: string): Promise<SessionSummary>
   renameSession(id: string, title: string): Promise<void>
   setSessionArchived(id: string, archived: boolean): Promise<void>
+  /** Switches an existing session to a different provider/model, keeping its message history. */
+  updateSessionModel(id: string, providerId: ProviderId, modelId: string): Promise<void>
 
   listMessages(sessionId: string): Promise<ChatMessage[]>
   sendMessage(
@@ -26,9 +29,13 @@ export interface TokenThriftApi {
   listModels(): Promise<ModelInfo[]>
   refreshFreeModels(): Promise<void>
 
-  setProviderApiKey(providerId: ProviderId, apiKey: string): Promise<void>
   getProviderStatus(providerId: ProviderId): Promise<ProviderStatus>
   setProviderAllowPaid(providerId: ProviderId, allow: boolean): Promise<void>
+
+  listApiKeys(providerId: ProviderId): Promise<StoredKeyInfo[]>
+  addApiKey(providerId: ProviderId, label: string, apiKey: string): Promise<StoredKeyInfo>
+  removeApiKey(providerId: ProviderId, keyId: string): Promise<void>
+  setActiveApiKey(providerId: ProviderId, keyId: string): Promise<void>
 
   getModelOverrides(providerId: ProviderId, modelId: string): Promise<ModelOverrides | null>
   setModelOverrides(

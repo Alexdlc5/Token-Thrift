@@ -7,6 +7,8 @@ export type ProviderId =
   | 'cerebras'
   | 'nvidia-nim'
   | 'huggingface'
+  | 'mistral'
+  | 'cloudflare-workers-ai'
 
 export interface ModelInfo {
   providerId: ProviderId
@@ -37,6 +39,8 @@ export interface ChatMessage {
   content: string
   reasoning?: string
   createdAt: number
+  /** True once this message has been folded into a later summary — still shown in the UI, no longer sent to the model. */
+  compressed: boolean
 }
 
 export type TaskStatus = 'queued' | 'streaming' | 'done' | 'error'
@@ -71,4 +75,12 @@ export interface ModelOverrides {
 export interface ProviderStatus {
   hasApiKey: boolean
   allowPaid: boolean
+  activeKeyId: string | null
+}
+
+/** One saved, named API key for a provider — never the decrypted value itself. */
+export interface StoredKeyInfo {
+  id: string
+  label: string
+  createdAt: number
 }

@@ -1,14 +1,15 @@
-import type { ModelOverrides, ProviderId, SessionSummary } from '@shared/models'
+import { useState } from 'react'
+import type { ModelOverrides, ProviderId, SessionSummary, StoredKeyInfo } from '@shared/models'
 import { PROVIDER_LABELS } from './mockData'
 
-export interface ProviderSetting {
-  apiKey: string
-  allowPaid: boolean
-}
-
 interface SettingsScreenProps {
-  providerSettings: Record<ProviderId, ProviderSetting>
-  onUpdateProviderSetting: (providerId: ProviderId, patch: Partial<ProviderSetting>) => void
+  apiKeysByProvider: Record<ProviderId, StoredKeyInfo[]>
+  activeKeyByProvider: Record<ProviderId, string | null>
+  allowPaidByProvider: Record<ProviderId, boolean>
+  onAddApiKey: (providerId: ProviderId, label: string, apiKey: string) => void
+  onRemoveApiKey: (providerId: ProviderId, keyId: string) => void
+  onSetActiveApiKey: (providerId: ProviderId, keyId: string) => void
+  onSetAllowPaid: (providerId: ProviderId, allow: boolean) => void
   activeSession: SessionSummary | null
   overrides: ModelOverrides
   onUpdateOverrides: (patch: Partial<ModelOverrides>) => void
@@ -16,9 +17,106 @@ interface SettingsScreenProps {
 
 const ALL_PROVIDERS = Object.keys(PROVIDER_LABELS) as ProviderId[]
 
+function ProviderKeysCard({
+  providerId,
+  keys,
+  activeKeyId,
+  allowPaid,
+  onAdd,
+  onRemove,
+  onSetActive,
+  onSetAllowPaid
+}: {
+  providerId: ProviderId
+  keys: StoredKeyInfo[]
+  activeKeyId: string | null
+  allowPaid: boolean
+  onAdd: (label: string, apiKey: string) => void
+  onRemove: (keyId: string) => void
+  onSetActive: (keyId: string) => void
+  onSetAllowPaid: (allow: boolean) => void
+}): React.JSX.Element {
+  const [draftLabel, setDraftLabel] = useState('')
+  const [draftKey, setDraftKey] = useState('')
+
+  function commitAdd(): void {
+    if (!draftKey.trim()) return
+    onAdd(draftLabel.trim() || 'Untitled', draftKey.trim())
+    setDraftLabel('')
+    setDraftKey('')
+  }
+
+  return (
+    <div style={{ marginBottom: 16, border: '1px solid #333', borderRadius: 6, padding: 12 }}>
+      <div style={{ fontWeight: 600, marginBottom: 8 }}>{PROVIDER_LABELS[providerId]}</div>
+
+      {keys.length > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          {keys.map((key) => (
+            <div
+              key={key.id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                fontSize: 12,
+                padding: '4px 0',
+                opacity: key.id === activeKeyId ? 1 : 0.6
+              }}
+            >
+              <input
+                type="radio"
+                name={`${providerId}-active-key`}
+                checked={key.id === activeKeyId}
+                onChange={() => onSetActive(key.id)}
+              />
+              <span style={{ flex: 1 }}>
+                {key.label}
+                {key.id === activeKeyId ? ' (active)' : ''}
+              </span>
+              <span style={{ opacity: 0.6 }}>{new Date(key.createdAt).toLocaleDateString()}</span>
+              <button onClick={() => onRemove(key.id)} style={{ fontSize: 11 }}>
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+        <input
+          value={draftLabel}
+          onChange={(e) => setDraftLabel(e.target.value)}
+          placeholder="Label (e.g. personal)"
+          style={{ width: 140, padding: 6, fontSize: 12 }}
+        />
+        <input
+          type="password"
+          value={draftKey}
+          onChange={(e) => setDraftKey(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && commitAdd()}
+          placeholder="API key"
+          style={{ flex: 1, padding: 6, fontSize: 12 }}
+        />
+        <button onClick={commitAdd}>Save key</button>
+      </div>
+
+      <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <input type="checkbox" checked={allowPaid} onChange={(e) => onSetAllowPaid(e.target.checked)} />
+        Allow paid models
+      </label>
+    </div>
+  )
+}
+
 export default function SettingsScreen({
-  providerSettings,
-  onUpdateProviderSetting,
+  apiKeysByProvider,
+  activeKeyByProvider,
+  allowPaidByProvider,
+  onAddApiKey,
+  onRemoveApiKey,
+  onSetActiveApiKey,
+  onSetAllowPaid,
   activeSession,
   overrides,
   onUpdateOverrides
@@ -26,32 +124,24 @@ export default function SettingsScreen({
   return (
     <div style={{ padding: 24, overflowY: 'auto', height: '100%' }}>
       <h2>Provider settings</h2>
-      {ALL_PROVIDERS.map((providerId) => {
-        const setting = providerSettings[providerId]
-        return (
-          <div key={providerId} style={{ marginBottom: 16, border: '1px solid #333', borderRadius: 6, padding: 12 }}>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>{PROVIDER_LABELS[providerId]}</div>
-            <label style={{ display: 'block', marginBottom: 8, fontSize: 13 }}>
-              API key
-              <input
-                type="password"
-                value={setting.apiKey}
-                onChange={(e) => onUpdateProviderSetting(providerId, { apiKey: e.target.value })}
-                placeholder="sk-..."
-                style={{ display: 'block', width: 320, marginTop: 4, padding: 6 }}
-              />
-            </label>
-            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <input
-                type="checkbox"
-                checked={setting.allowPaid}
-                onChange={(e) => onUpdateProviderSetting(providerId, { allowPaid: e.target.checked })}
-              />
-              Allow paid models
-            </label>
-          </div>
-        )
-      })}
+      <p style={{ fontSize: 12, opacity: 0.6, maxWidth: 480, marginTop: -8 }}>
+        Multiple saved keys per provider are for genuinely separate accounts (personal vs.
+        work, etc.) — switching between them doesn't raise or reset any single provider's
+        rate limits.
+      </p>
+      {ALL_PROVIDERS.map((providerId) => (
+        <ProviderKeysCard
+          key={providerId}
+          providerId={providerId}
+          keys={apiKeysByProvider[providerId]}
+          activeKeyId={activeKeyByProvider[providerId]}
+          allowPaid={allowPaidByProvider[providerId]}
+          onAdd={(label, apiKey) => onAddApiKey(providerId, label, apiKey)}
+          onRemove={(keyId) => onRemoveApiKey(providerId, keyId)}
+          onSetActive={(keyId) => onSetActiveApiKey(providerId, keyId)}
+          onSetAllowPaid={(allow) => onSetAllowPaid(providerId, allow)}
+        />
+      ))}
 
       <h2>Model overrides</h2>
       {!activeSession ? (
