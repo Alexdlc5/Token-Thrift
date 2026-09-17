@@ -15,7 +15,7 @@ const api: TokenThriftApi = {
   createSession: (providerId, modelId, title) =>
     ipcRenderer.invoke(IPC.session.create, providerId, modelId, title),
   renameSession: (id, title) => ipcRenderer.invoke(IPC.session.rename, id, title),
-  archiveSession: (id) => ipcRenderer.invoke(IPC.session.archive, id),
+  setSessionArchived: (id, archived) => ipcRenderer.invoke(IPC.session.archive, id, archived),
 
   listMessages: (sessionId) => ipcRenderer.invoke(IPC.message.list, sessionId),
   sendMessage: (sessionId, content) => ipcRenderer.invoke(IPC.message.send, sessionId, content),

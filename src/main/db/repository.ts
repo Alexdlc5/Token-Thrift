@@ -124,12 +124,17 @@ export function listSessions(): SessionSummary[] {
   return rows.map(mapSession)
 }
 
+export function getSession(id: string): SessionSummary | undefined {
+  const row = conn().prepare(`SELECT * FROM sessions WHERE id = ?`).get(id) as unknown as SessionRow | undefined
+  return row ? mapSession(row) : undefined
+}
+
 export function renameSession(id: string, title: string): void {
   conn().prepare(`UPDATE sessions SET title = ? WHERE id = ?`).run(title, id)
 }
 
-export function archiveSession(id: string): void {
-  conn().prepare(`UPDATE sessions SET archived = 1 WHERE id = ?`).run(id)
+export function setSessionArchived(id: string, archived: boolean): void {
+  conn().prepare(`UPDATE sessions SET archived = ? WHERE id = ?`).run(archived ? 1 : 0, id)
 }
 
 // ---- messages ----

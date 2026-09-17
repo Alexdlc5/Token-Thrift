@@ -56,8 +56,8 @@ async function fetchModels(): Promise<ModelInfo[]> {
   return [FREE_ROUTER_MODEL, ...body.data.map(toModelInfo)]
 }
 
-async function getCachedModels(): Promise<ModelInfo[]> {
-  if (cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS) return cache.models
+async function getCachedModels(forceRefresh = false): Promise<ModelInfo[]> {
+  if (!forceRefresh && cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS) return cache.models
   const models = await fetchModels()
   cache = { models, fetchedAt: Date.now() }
   return models
@@ -123,8 +123,8 @@ class OpenRouterProvider implements LLMProvider {
   readonly id = 'openrouter' as const
   readonly supportsReasoningTrace = true
 
-  async listModels(): Promise<ModelInfo[]> {
-    return getCachedModels()
+  async listModels(opts?: { forceRefresh?: boolean }): Promise<ModelInfo[]> {
+    return getCachedModels(opts?.forceRefresh)
   }
 
   isFree(modelId: string): boolean {

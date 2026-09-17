@@ -9,7 +9,6 @@ import { SCHEMA } from './schema'
 import {
   _setDbForTesting,
   addMessage,
-  archiveSession,
   createSession,
   createTask,
   getTask,
@@ -17,6 +16,7 @@ import {
   listSessions,
   listTasks,
   renameSession,
+  setSessionArchived,
   updateTask
 } from './repository'
 
@@ -107,7 +107,7 @@ for (let i = 0; i + 1 < allTasks.length; i++) {
 
 // --- archive ---
 
-archiveSession(session.id)
+setSessionArchived(session.id, true)
 const archived = listSessions().find((s) => s.id === session.id)
 assert.strictEqual(archived?.archived, true)
 

@@ -33,7 +33,7 @@ export interface LLMProvider {
   readonly supportsReasoningTrace: boolean
 
   /** Live model list from the provider's own API, tagged with current pricing. */
-  listModels(): Promise<ModelInfo[]>
+  listModels(opts?: { forceRefresh?: boolean }): Promise<ModelInfo[]>
 
   /** Resolved from the cached model list — never hardcode free-model IDs. */
   isFree(modelId: string): boolean
