@@ -145,12 +145,15 @@ function registerIpcHandlers(): void {
     return { taskId: task.id }
   })
 
+  // allSettled, not all: most providers require an API key even to list models, so one
+  // unconfigured provider (the common case before the user has pasted every key) must not
+  // blank out every other provider's model list.
   ipcMain.handle(IPC.model.list, async () => {
-    const lists = await Promise.all(listProviders().map((p) => p.listModels()))
-    return lists.flat()
+    const results = await Promise.allSettled(listProviders().map((p) => p.listModels()))
+    return results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
   })
   ipcMain.handle(IPC.model.refreshFree, async () => {
-    await Promise.all(listProviders().map((p) => p.listModels({ forceRefresh: true })))
+    await Promise.allSettled(listProviders().map((p) => p.listModels({ forceRefresh: true })))
   })
 
   ipcMain.handle(IPC.provider.setApiKey, async (_e, providerId, apiKey) =>
