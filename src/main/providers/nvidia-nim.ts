@@ -38,6 +38,29 @@ interface NvidiaModelEntry {
 // instance, and a plain timestamp check is enough — no setInterval/background refresh.
 let cache: { models: ModelInfo[]; fetchedAt: number } | undefined
 
+// No context-length field anywhere in NIM's listing response, and 100+ hosted models makes
+// a hand-maintained per-model table impractical (it'd be stale the day it's written). Two
+// fallbacks instead, both approximate:
+// 1. Many model ids literally encode it (e.g. "phi-3-medium-128k-instruct") - parse that
+//    first since it's the most specific signal available.
+// 2. Otherwise pattern-match a handful of well-known families by their published base
+//    context length, falling back to a generic default for anything unrecognized.
+const FAMILY_CONTEXT_LENGTH: [RegExp, number][] = [
+  [/llama-?3\.[123]/i, 128000],
+  [/deepseek-?r1/i, 128000],
+  [/nemotron/i, 128000], // NVIDIA's own tune, built on Llama 3.1
+  [/mixtral/i, 32768],
+  [/gemma-?2/i, 8192],
+  [/qwen-?2\.5/i, 32768]
+]
+const DEFAULT_CONTEXT_LENGTH = 32768
+
+function approximateContextLength(modelId: string): number {
+  const explicit = modelId.match(/(\d+)k(?:-|$)/i)
+  if (explicit) return Number(explicit[1]) * 1000
+  return FAMILY_CONTEXT_LENGTH.find(([pattern]) => pattern.test(modelId))?.[1] ?? DEFAULT_CONTEXT_LENGTH
+}
+
 function toModelInfo(entry: NvidiaModelEntry): ModelInfo {
   return {
     providerId: 'nvidia-nim',
@@ -47,7 +70,9 @@ function toModelInfo(entry: NvidiaModelEntry): ModelInfo {
     label: entry.id,
     // Whole hosted API-key surface is free-tier by design; see file header.
     isFree: true,
-    supportsReasoningTrace: true
+    supportsReasoningTrace: true,
+    contextLength: approximateContextLength(entry.id),
+    contextLengthApprox: true
   }
 }
 
@@ -193,7 +218,9 @@ if (require.main === module) {
   void (async () => {
     const fixtureEntries: NvidiaModelEntry[] = [
       { id: 'deepseek-ai/deepseek-r1', object: 'model', owned_by: 'deepseek-ai' },
-      { id: 'meta/llama-3.1-8b-instruct', object: 'model', owned_by: 'meta' }
+      { id: 'meta/llama-3.1-8b-instruct', object: 'model', owned_by: 'meta' },
+      { id: 'microsoft/phi-3-medium-128k-instruct', object: 'model', owned_by: 'microsoft' },
+      { id: 'some-vendor/brand-new-model', object: 'model', owned_by: 'some-vendor' }
     ]
     const models = fixtureEntries.map(toModelInfo)
     assert.deepStrictEqual(models, [
@@ -202,14 +229,36 @@ if (require.main === module) {
         modelId: 'deepseek-ai/deepseek-r1',
         label: 'deepseek-ai/deepseek-r1',
         isFree: true,
-        supportsReasoningTrace: true
+        supportsReasoningTrace: true,
+        contextLength: 128000,
+        contextLengthApprox: true
       },
       {
         providerId: 'nvidia-nim',
         modelId: 'meta/llama-3.1-8b-instruct',
         label: 'meta/llama-3.1-8b-instruct',
         isFree: true,
-        supportsReasoningTrace: true
+        supportsReasoningTrace: true,
+        contextLength: 128000,
+        contextLengthApprox: true
+      },
+      {
+        providerId: 'nvidia-nim',
+        modelId: 'microsoft/phi-3-medium-128k-instruct',
+        label: 'microsoft/phi-3-medium-128k-instruct',
+        isFree: true,
+        supportsReasoningTrace: true,
+        contextLength: 128000, // parsed from the "128k" in the id itself, not a family guess
+        contextLengthApprox: true
+      },
+      {
+        providerId: 'nvidia-nim',
+        modelId: 'some-vendor/brand-new-model',
+        label: 'some-vendor/brand-new-model',
+        isFree: true,
+        supportsReasoningTrace: true,
+        contextLength: DEFAULT_CONTEXT_LENGTH,
+        contextLengthApprox: true
       }
     ])
 

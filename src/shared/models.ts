@@ -15,6 +15,8 @@ export interface ModelInfo {
   isFree: boolean
   supportsReasoningTrace: boolean
   contextLength?: number
+  /** True when contextLength isn't from the provider's live listing (a static lookup, a family-pattern guess, or a router's min-across-candidates) — never authoritative for the exact request that will run. */
+  contextLengthApprox?: boolean
 }
 
 export interface SessionSummary {

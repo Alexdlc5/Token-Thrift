@@ -5,6 +5,7 @@ import ChatPane from './ChatPane'
 import SettingsScreen, { type ProviderSetting } from './SettingsScreen'
 import NewSessionPicker from './NewSessionPicker'
 import TaskMonitorPanel from './TaskMonitorPanel'
+import UsageTracker from './UsageTracker'
 import { DEFAULT_OVERRIDES } from './mockData'
 
 const ALL_PROVIDERS: ProviderId[] = [
@@ -41,6 +42,9 @@ export default function App(): React.JSX.Element {
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
   const activeMessages = messages.filter((m) => m.sessionId === activeSessionId)
   const activeOverrides = (activeSessionId && overridesBySession[activeSessionId]) || DEFAULT_OVERRIDES
+  const activeModelInfo = activeSession
+    ? models.find((m) => m.providerId === activeSession.providerId && m.modelId === activeSession.modelId)
+    : undefined
 
   function replaceSessionMessages(sessionId: string, next: ChatMessage[]): void {
     setMessages((prev) => [...prev.filter((m) => m.sessionId !== sessionId), ...next])
@@ -223,6 +227,13 @@ export default function App(): React.JSX.Element {
             {showMonitor ? 'Hide monitor' : 'Show monitor'}
           </button>
         </div>
+        {view === 'chat' && activeSession && (
+          <UsageTracker
+            sessionId={activeSession.id}
+            contextLength={activeModelInfo?.contextLength}
+            contextLengthApprox={activeModelInfo?.contextLengthApprox}
+          />
+        )}
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
           {view === 'chat' ? (
             <ChatPane session={activeSession} messages={activeMessages} onSend={handleSend} />

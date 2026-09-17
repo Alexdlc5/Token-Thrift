@@ -120,6 +120,11 @@ export default function TaskMonitorPanel(): React.JSX.Element {
           topLevel.map((task) => renderTask(task, 0))
         )}
       </div>
+      <div style={{ padding: '8px 12px', borderTop: '1px solid #333', fontSize: 11, opacity: 0.7 }}>
+        Total: {tasks.reduce((sum, t) => sum + (t.promptTokens ?? 0) + (t.completionTokens ?? 0), 0).toLocaleString()}{' '}
+        tok across {tasks.length} request{tasks.length === 1 ? '' : 's'} · $
+        {tasks.reduce((sum, t) => sum + t.costUsd, 0).toFixed(4)}
+      </div>
     </div>
   )
 }

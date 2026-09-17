@@ -32,6 +32,19 @@ interface CerebrasModelEntry {
   owned_by?: string
 }
 
+// /v1/models reports no context-length field at all, and Cerebras caps the free tier's
+// context below the model's own native max (a hardware/inference-architecture limit, not
+// something derivable from the model card) — confirmed against
+// inference-docs.cerebras.ai/models/overview (as of 2026-09-17): gpt-oss-120b is 65k on
+// Free vs 131k on paid, qwen-3.8-27b is 64k on Free vs 128k on paid. Static lookup, so
+// flagged approximate; falls back to the more conservative of the two if Cerebras adds a
+// model this table doesn't know about yet.
+const FREE_TIER_CONTEXT_LENGTH: Record<string, number> = {
+  'gpt-oss-120b': 65536,
+  'qwen-3.8-27b': 64000
+}
+const DEFAULT_FREE_TIER_CONTEXT_LENGTH = 64000
+
 // Module-level cache (not a class field): there's only ever one Cerebras provider instance.
 let cache: { models: ModelInfo[]; fetchedAt: number } | undefined
 
@@ -46,7 +59,9 @@ function toModelInfo(entry: CerebrasModelEntry): ModelInfo {
     // by default, so true is accurate today; a future non-reasoning model just never sends
     // a delta.reasoning chunk and this flag becomes a harmless no-op for it (same
     // simplification openrouter.ts makes).
-    supportsReasoningTrace: true
+    supportsReasoningTrace: true,
+    contextLength: FREE_TIER_CONTEXT_LENGTH[entry.id] ?? DEFAULT_FREE_TIER_CONTEXT_LENGTH,
+    contextLengthApprox: true
   }
 }
 
@@ -178,6 +193,15 @@ if (require.main === module) {
     const provider = new CerebrasProvider()
     assert.strictEqual(provider.isFree('gpt-oss-120b'), true, 'cerebras has no paid models')
     assert.strictEqual(provider.isFree('anything-unknown'), true, 'cerebras has no paid models')
+
+    assert.strictEqual(toModelInfo({ id: 'gpt-oss-120b' }).contextLength, 65536, 'known free-tier context cap')
+    assert.strictEqual(toModelInfo({ id: 'qwen-3.8-27b' }).contextLength, 64000, 'known free-tier context cap')
+    assert.strictEqual(
+      toModelInfo({ id: 'some-future-model' }).contextLength,
+      DEFAULT_FREE_TIER_CONTEXT_LENGTH,
+      'unknown model falls back to the default approximation'
+    )
+    assert.strictEqual(toModelInfo({ id: 'gpt-oss-120b' }).contextLengthApprox, true)
 
     const sseText =
       'data: {"choices":[{"delta":{"reasoning":"thinking..."}}]}\n\n' +

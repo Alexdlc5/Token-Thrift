@@ -19,12 +19,22 @@ const CACHE_TTL_MS = 30 * 60 * 1000
 
 // Pinned regardless of what the live listing returns, so there's always a default free
 // router even if OpenRouter's catalog changes shape or the fetch fails after a stale cache.
-const FREE_ROUTER_MODEL: ModelInfo = {
+const FREE_ROUTER_MODEL_BASE: Omit<ModelInfo, 'contextLength' | 'contextLengthApprox'> = {
   providerId: 'openrouter',
   modelId: 'openrouter/free',
   label: 'Auto (free)',
   isFree: true,
   supportsReasoningTrace: true
+}
+
+// The auto-router can land on any currently-free model, so there's no single real context
+// length for it — approximate with the smallest among the free set (the conservative
+// choice: better to under-promise room than have a long conversation silently truncate on
+// whichever small-context model got picked).
+function buildFreeRouterModel(freeModels: ModelInfo[]): ModelInfo {
+  const lengths = freeModels.map((m) => m.contextLength).filter((n): n is number => n !== undefined)
+  if (lengths.length === 0) return FREE_ROUTER_MODEL_BASE
+  return { ...FREE_ROUTER_MODEL_BASE, contextLength: Math.min(...lengths), contextLengthApprox: true }
 }
 
 interface OpenRouterModelEntry {
@@ -53,7 +63,9 @@ async function fetchModels(): Promise<ModelInfo[]> {
   const res = await fetch(MODELS_URL)
   if (!res.ok) throw new Error(`OpenRouter model list failed: ${res.status} ${res.statusText}`)
   const body = (await res.json()) as { data: OpenRouterModelEntry[] }
-  return [FREE_ROUTER_MODEL, ...body.data.map(toModelInfo)]
+  const models = body.data.map(toModelInfo)
+  const freeModels = models.filter((m) => m.isFree)
+  return [buildFreeRouterModel(freeModels), ...models]
 }
 
 async function getCachedModels(forceRefresh = false): Promise<ModelInfo[]> {
@@ -128,7 +140,7 @@ class OpenRouterProvider implements LLMProvider {
   }
 
   isFree(modelId: string): boolean {
-    if (modelId === FREE_ROUTER_MODEL.modelId) return true
+    if (modelId === FREE_ROUTER_MODEL_BASE.modelId) return true
     return cache?.models.find((m) => m.modelId === modelId)?.isFree ?? false
   }
 
@@ -191,7 +203,16 @@ if (require.main === module) {
         context_length: 128000
       }
     ]
-    cache = { models: [FREE_ROUTER_MODEL, ...fixtureEntries.map(toModelInfo)], fetchedAt: Date.now() }
+    const fixtureModels = fixtureEntries.map(toModelInfo)
+    const freeRouter = buildFreeRouterModel(fixtureModels.filter((m) => m.isFree))
+    cache = { models: [freeRouter, ...fixtureModels], fetchedAt: Date.now() }
+
+    assert.strictEqual(
+      freeRouter.contextLength,
+      8192,
+      'auto-router context length approximates to the min among free models'
+    )
+    assert.strictEqual(freeRouter.contextLengthApprox, true, 'auto-router context length is flagged as approximate')
 
     const provider = new OpenRouterProvider()
     assert.strictEqual(provider.isFree('openrouter/free'), true, 'pinned free router must be free')
