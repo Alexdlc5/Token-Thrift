@@ -483,6 +483,21 @@ async function runChatTask(
           const message = err instanceof Error ? err.message : String(err)
           assistantContent = [assistantContent, `_Writing files failed: ${message}_`].filter(Boolean).join('\n\n')
         }
+      } else if (assistantContent.includes('```')) {
+        // agentFileAccess is ON but the model printed a plain code block instead of using the
+        // <write_files> format — a compliance miss (free-tier models don't always follow a
+        // format instruction), not the toggle being off. Previously this failed silently: the
+        // code just showed up as a normal reply with nothing written to disk and no sign
+        // anything was wrong. Flag it so it's diagnosable instead of looking like the feature
+        // stopped working.
+        assistantContent = [
+          assistantContent,
+          '_Note: agent file access is on, but this reply used a plain code block instead of ' +
+            'the file-writing format, so nothing was written to disk. Asking again more ' +
+            'explicitly (e.g. "write this to disk as real files") usually fixes it._'
+        ]
+          .filter(Boolean)
+          .join('\n\n')
       }
     }
 

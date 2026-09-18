@@ -136,17 +136,16 @@ const WRITE_FILES_TAG = 'write_files'
  * existing code to extend) instead of only ever scaffolding blind from nothing. */
 function buildFileAgentInstruction(snapshot: WorkingDirectorySnapshot | null): string {
   const parts = [
-    "You can write real files to disk — when asked to build/scaffold/modify an app/script/" +
-      "project, don't just print code blocks to copy by hand; write the actual files in " +
-      'this format:',
+    'When asked to build/scaffold/modify an app/script/project, you MUST write the actual ' +
+      'files to disk using the exact format below — never reply with a plain markdown code ' +
+      'block instead, even for a single file:',
     `<${WRITE_FILES_TAG}>\n### PROJECT: <short-project-name>\n### FILE: <relative/path/one.ext>\n<full file contents>\n### FILE: <relative/path/two.ext>\n<full file contents>\n</${WRITE_FILES_TAG}>`,
     'Rules: FULL file contents only, never a diff or "...rest unchanged" — each FILE section ' +
-      'fully replaces that file. Relative paths only (never absolute or "../"). Keep the ' +
-      'PROJECT name identical across a conversation about the same project so later edits ' +
-      'land in the same place. Only for actual file creation/changes — not for a single ' +
-      'snippet or explanation. Do NOT wrap a FILE section in a markdown code fence (no ``` ' +
-      "lines) — the content between FILE markers is written to disk exactly as-is, so a " +
-      'fence line becomes a broken first/last line of the real file.'
+      'fully replaces that file, with no markdown code fence around it (the content between ' +
+      'FILE markers is written to disk exactly as-is — a ``` line would become a broken line ' +
+      'of the real file). Relative paths only (never absolute or "../"). Keep the PROJECT name ' +
+      'identical across a conversation about the same project so later edits land in the same ' +
+      'place. Only for actual file creation/changes — not for a single snippet or explanation.'
   ]
 
   if (snapshot && snapshot.paths.length > 0) {
