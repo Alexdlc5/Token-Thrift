@@ -12,14 +12,18 @@ import {
   createSession,
   createTask,
   deleteSession,
+  getSessionDocument,
   getTask,
+  isDocumentModeEnabled,
   listMessages,
   listMessagesForModel,
   listSessions,
   listTasks,
   markMessagesCompressed,
   renameSession,
+  setDocumentMode,
   setSessionArchived,
+  setSessionDocument,
   updateSessionModel,
   updateTask
 } from './repository'
@@ -138,6 +142,33 @@ updateSessionModel(session.id, 'openrouter', 'openrouter/free')
 const switched = listSessions().find((s) => s.id === session.id)
 assert.strictEqual(switched?.providerId, 'openrouter')
 assert.strictEqual(switched?.modelId, 'openrouter/free')
+
+// --- document ---
+
+assert.strictEqual(getSessionDocument(session.id), null, 'no document yet')
+assert.strictEqual(isDocumentModeEnabled(session.id), false, 'document mode off by default')
+
+setDocumentMode(session.id, true)
+assert.strictEqual(isDocumentModeEnabled(session.id), true)
+
+const savedDoc = setSessionDocument(session.id, {
+  kind: 'text',
+  content: 'Resume draft v1',
+  mimeType: null,
+  fileName: 'resume.md'
+})
+assert.strictEqual(savedDoc.content, 'Resume draft v1')
+assert.strictEqual(getSessionDocument(session.id)?.content, 'Resume draft v1')
+
+setSessionDocument(session.id, {
+  kind: 'file',
+  content: 'data:application/pdf;base64,AAAA',
+  mimeType: 'application/pdf',
+  fileName: 'resume.pdf'
+})
+const fileDoc = getSessionDocument(session.id)
+assert.strictEqual(fileDoc?.kind, 'file')
+assert.strictEqual(fileDoc?.mimeType, 'application/pdf')
 
 // --- delete ---
 

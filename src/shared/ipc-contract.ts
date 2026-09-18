@@ -33,6 +33,13 @@ export const IPC = {
   task: {
     list: 'task:list'
   },
+  document: {
+    get: 'document:get',
+    setText: 'document:setText',
+    setFile: 'document:setFile',
+    getMode: 'document:getMode',
+    setMode: 'document:setMode'
+  },
   events: {
     taskUpdate: 'event:taskUpdate',
     chatChunk: 'event:chatChunk',

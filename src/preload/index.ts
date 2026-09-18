@@ -45,6 +45,14 @@ const api: TokenThriftApi = {
 
   listTasks: () => ipcRenderer.invoke(IPC.task.list),
 
+  getDocument: (sessionId) => ipcRenderer.invoke(IPC.document.get, sessionId),
+  setDocumentText: (sessionId, content, fileName) =>
+    ipcRenderer.invoke(IPC.document.setText, sessionId, content, fileName),
+  setDocumentFile: (sessionId, content, mimeType, fileName) =>
+    ipcRenderer.invoke(IPC.document.setFile, sessionId, content, mimeType, fileName),
+  getDocumentMode: (sessionId) => ipcRenderer.invoke(IPC.document.getMode, sessionId),
+  setDocumentMode: (sessionId, enabled) => ipcRenderer.invoke(IPC.document.setMode, sessionId, enabled),
+
   onTaskUpdate: (cb) => on<TaskRow>(IPC.events.taskUpdate, cb),
   onChatChunk: (cb) => on<ChatStreamChunk>(IPC.events.chatChunk, cb),
   onChatDone: (cb) => on<ChatStreamDone>(IPC.events.chatDone, cb),

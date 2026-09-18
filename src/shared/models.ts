@@ -84,3 +84,20 @@ export interface StoredKeyInfo {
   label: string
   createdAt: number
 }
+
+export type DocumentKind = 'text' | 'file'
+
+/**
+ * The one working file a session can carry, shown above the chat input. 'text' documents
+ * are editable by both the user and (when documentMode is on) the model, via a response
+ * convention — see main/prompt-modules.ts. 'file' documents are a loaded image/PDF shown
+ * as a reference; the model never edits those, only text ones.
+ */
+export interface SessionDocument {
+  kind: DocumentKind
+  /** Plain text for 'text'; a data: URL for 'file'. */
+  content: string
+  mimeType: string | null
+  fileName: string | null
+  updatedAt: number
+}

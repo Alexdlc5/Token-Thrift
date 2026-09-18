@@ -9,7 +9,9 @@ import { getDb } from './schema'
 import type {
   ChatMessage,
   ChatRole,
+  DocumentKind,
   ProviderId,
+  SessionDocument,
   SessionSummary,
   TaskRow,
   TaskStatus
@@ -144,6 +146,63 @@ export function setSessionArchived(id: string, archived: boolean): void {
 /** Switches a session to a different provider/model without touching its message history. */
 export function updateSessionModel(id: string, providerId: ProviderId, modelId: string): void {
   conn().prepare(`UPDATE sessions SET provider_id = ?, model_id = ? WHERE id = ?`).run(providerId, modelId, id)
+}
+
+// ---- document (one working file per session, shown above the chat input) ----
+
+interface DocumentRow {
+  document_kind: DocumentKind | null
+  document_content: string | null
+  document_mime_type: string | null
+  document_file_name: string | null
+  document_updated_at: number | null
+}
+
+function mapDocument(row: DocumentRow): SessionDocument | null {
+  if (!row.document_kind || row.document_content === null) return null
+  return {
+    kind: row.document_kind,
+    content: row.document_content,
+    mimeType: row.document_mime_type,
+    fileName: row.document_file_name,
+    updatedAt: row.document_updated_at ?? 0
+  }
+}
+
+export function getSessionDocument(sessionId: string): SessionDocument | null {
+  const row = conn()
+    .prepare(
+      `SELECT document_kind, document_content, document_mime_type, document_file_name, document_updated_at
+       FROM sessions WHERE id = ?`
+    )
+    .get(sessionId) as unknown as DocumentRow | undefined
+  return row ? mapDocument(row) : null
+}
+
+export function setSessionDocument(
+  sessionId: string,
+  doc: { kind: DocumentKind; content: string; mimeType: string | null; fileName: string | null }
+): SessionDocument {
+  const updatedAt = Date.now()
+  conn()
+    .prepare(
+      `UPDATE sessions
+       SET document_kind = ?, document_content = ?, document_mime_type = ?, document_file_name = ?, document_updated_at = ?
+       WHERE id = ?`
+    )
+    .run(doc.kind, doc.content, doc.mimeType, doc.fileName, updatedAt, sessionId)
+  return { ...doc, updatedAt }
+}
+
+export function isDocumentModeEnabled(sessionId: string): boolean {
+  const row = conn().prepare(`SELECT document_mode FROM sessions WHERE id = ?`).get(sessionId) as
+    | { document_mode: number }
+    | undefined
+  return row?.document_mode === 1
+}
+
+export function setDocumentMode(sessionId: string, enabled: boolean): void {
+  conn().prepare(`UPDATE sessions SET document_mode = ? WHERE id = ?`).run(enabled ? 1 : 0, sessionId)
 }
 
 /** Permanently removes a session and everything under it — irreversible, unlike archiving. */

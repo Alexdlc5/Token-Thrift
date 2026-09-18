@@ -5,6 +5,7 @@ import type {
   ModelOverrides,
   ProviderId,
   ProviderStatus,
+  SessionDocument,
   SessionSummary,
   StoredKeyInfo,
   TaskRow
@@ -47,6 +48,20 @@ export interface TokenThriftApi {
   ): Promise<void>
 
   listTasks(): Promise<TaskRow[]>
+
+  getDocument(sessionId: string): Promise<SessionDocument | null>
+  /** User- or model-authored edit to the session's text document. */
+  setDocumentText(sessionId: string, content: string, fileName?: string): Promise<SessionDocument>
+  /** Loads an image/PDF as the session's reference document — content must be a data: URL. */
+  setDocumentFile(
+    sessionId: string,
+    content: string,
+    mimeType: string,
+    fileName: string
+  ): Promise<SessionDocument>
+  getDocumentMode(sessionId: string): Promise<boolean>
+  /** Whether the model is instructed to edit the text document via its response convention. */
+  setDocumentMode(sessionId: string, enabled: boolean): Promise<void>
 
   onTaskUpdate(cb: (task: TaskRow) => void): () => void
   onChatChunk(cb: (evt: ChatStreamChunk) => void): () => void

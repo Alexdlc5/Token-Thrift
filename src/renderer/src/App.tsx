@@ -6,6 +6,7 @@ import SettingsScreen from './SettingsScreen'
 import NewSessionPicker from './NewSessionPicker'
 import TaskMonitorPanel from './TaskMonitorPanel'
 import UsageTracker from './UsageTracker'
+import DocumentPanel from './DocumentPanel'
 import { DEFAULT_OVERRIDES } from './mockData'
 
 const ALL_PROVIDERS: ProviderId[] = [
@@ -292,6 +293,7 @@ export default function App(): React.JSX.Element {
             contextLengthApprox={activeModelInfo?.contextLengthApprox}
           />
         )}
+        {view === 'chat' && activeSession && <DocumentPanel sessionId={activeSession.id} />}
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
           {view === 'chat' ? (
             <ChatPane session={activeSession} messages={activeMessages} onSend={handleSend} />

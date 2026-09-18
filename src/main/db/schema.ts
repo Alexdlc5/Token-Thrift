@@ -15,7 +15,13 @@ CREATE TABLE IF NOT EXISTS sessions (
   model_id TEXT NOT NULL,
   title TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  archived INTEGER NOT NULL DEFAULT 0
+  archived INTEGER NOT NULL DEFAULT 0,
+  document_kind TEXT,
+  document_content TEXT,
+  document_mime_type TEXT,
+  document_file_name TEXT,
+  document_updated_at INTEGER,
+  document_mode INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -56,7 +62,13 @@ CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id);
 // column that already exists, which this treats as "already migrated," not a failure.
 const COLUMN_MIGRATIONS: string[] = [
   'ALTER TABLE tasks ADD COLUMN system_prompt TEXT',
-  'ALTER TABLE messages ADD COLUMN compressed INTEGER NOT NULL DEFAULT 0'
+  'ALTER TABLE messages ADD COLUMN compressed INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE sessions ADD COLUMN document_kind TEXT',
+  'ALTER TABLE sessions ADD COLUMN document_content TEXT',
+  'ALTER TABLE sessions ADD COLUMN document_mime_type TEXT',
+  'ALTER TABLE sessions ADD COLUMN document_file_name TEXT',
+  'ALTER TABLE sessions ADD COLUMN document_updated_at INTEGER',
+  'ALTER TABLE sessions ADD COLUMN document_mode INTEGER NOT NULL DEFAULT 0'
 ]
 
 export function applyColumnMigrations(database: DatabaseSync): void {
@@ -101,8 +113,11 @@ if (require.main === module) {
   applyColumnMigrations(oldShapeDb)
   const messageCols = oldShapeDb.prepare('PRAGMA table_info(messages)').all().map((c) => (c as { name: string }).name)
   const taskCols = oldShapeDb.prepare('PRAGMA table_info(tasks)').all().map((c) => (c as { name: string }).name)
+  const sessionCols = oldShapeDb.prepare('PRAGMA table_info(sessions)').all().map((c) => (c as { name: string }).name)
   assert.ok(messageCols.includes('compressed'), 'compressed column added to an old-shape table')
   assert.ok(taskCols.includes('system_prompt'), 'system_prompt column added to an old-shape table')
+  assert.ok(sessionCols.includes('document_content'), 'document columns added to an old-shape sessions table')
+  assert.ok(sessionCols.includes('document_mode'), 'document_mode column added to an old-shape sessions table')
   assert.strictEqual(
     oldShapeDb.prepare('SELECT content FROM messages WHERE id = ?').get('m1')?.content,
     'hello',

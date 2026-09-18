@@ -8,17 +8,21 @@ import {
   createTask,
   deleteSession,
   getSession,
+  getSessionDocument,
+  isDocumentModeEnabled,
   listMessages,
   listMessagesForModel,
   listSessions,
   listTasks,
   renameSession,
+  setDocumentMode,
   setSessionArchived,
+  setSessionDocument,
   updateSessionModel,
   updateTask
 } from './db/repository'
 import { getProvider, listProviders } from './providers'
-import { buildSystemPrompt } from './prompt-modules'
+import { buildSystemPrompt, extractDocumentUpdate } from './prompt-modules'
 import { fitHistoryToBudget } from './context-window'
 import { maybeCompressSession } from './context-compression'
 import {
@@ -138,7 +142,22 @@ async function runChatTask(
       }
     }
 
-    addMessage(sessionId, 'assistant', answer, reasoning || undefined)
+    let assistantContent = answer
+    if (isDocumentModeEnabled(sessionId)) {
+      const update = extractDocumentUpdate(answer)
+      if (update) {
+        const existing = getSessionDocument(sessionId)
+        setSessionDocument(sessionId, {
+          kind: 'text',
+          content: update.content,
+          mimeType: null,
+          fileName: existing?.fileName ?? null
+        })
+        assistantContent = update.remainder || '_Updated the document — see the panel above._'
+      }
+    }
+
+    addMessage(sessionId, 'assistant', assistantContent, reasoning || undefined)
     const done = updateTask(task.id, {
       status: 'done',
       endedAt: Date.now(),
@@ -181,12 +200,16 @@ function registerIpcHandlers(): void {
       if (!session) throw new Error(`Unknown session "${sessionId}"`)
 
       addMessage(sessionId, 'user', content)
+
+      const modeEnabled = isDocumentModeEnabled(sessionId)
+      const document = modeEnabled ? getSessionDocument(sessionId) : null
+
       const task = createTask({
         parentTaskId: null,
         sessionId,
         providerId: session.providerId,
         modelId: session.modelId,
-        systemPrompt: buildSystemPrompt(overrides)
+        systemPrompt: buildSystemPrompt(overrides, { document, modeEnabled })
       })
 
       const win = BrowserWindow.fromWebContents(event.sender)
@@ -233,6 +256,28 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.overrides.set, async () => {})
 
   ipcMain.handle(IPC.task.list, async () => listTasks())
+
+  // Data-URL uploads land here as a full string over IPC — cap it so a huge file doesn't
+  // bloat the SQLite settings row indefinitely (base64 inflates ~33% over the raw bytes).
+  const MAX_DOCUMENT_FILE_BYTES = 15 * 1024 * 1024
+  ipcMain.handle(IPC.document.get, async (_e, sessionId) => getSessionDocument(sessionId))
+  ipcMain.handle(IPC.document.setText, async (_e, sessionId, content, fileName) => {
+    const existing = getSessionDocument(sessionId)
+    return setSessionDocument(sessionId, {
+      kind: 'text',
+      content,
+      mimeType: null,
+      fileName: fileName !== undefined ? fileName : (existing?.fileName ?? null)
+    })
+  })
+  ipcMain.handle(IPC.document.setFile, async (_e, sessionId, content, mimeType, fileName) => {
+    if (content.length > MAX_DOCUMENT_FILE_BYTES) {
+      throw new Error('File is too large (max 15MB)')
+    }
+    return setSessionDocument(sessionId, { kind: 'file', content, mimeType, fileName })
+  })
+  ipcMain.handle(IPC.document.getMode, async (_e, sessionId) => isDocumentModeEnabled(sessionId))
+  ipcMain.handle(IPC.document.setMode, async (_e, sessionId, enabled) => setDocumentMode(sessionId, enabled))
 }
 
 // A second launch (e.g. double-clicking the desktop shortcut while a previous instance is
