@@ -235,16 +235,32 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.task.list, async () => listTasks())
 }
 
-void app.whenReady().then(() => {
-  getDb()
-  registerIpcHandlers()
-  createWindow()
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+// A second launch (e.g. double-clicking the desktop shortcut while a previous instance is
+// still alive in the background) would otherwise race the first instance on the same
+// SQLite file and settings JSON — request the lock and quit immediately if another instance
+// already holds it, focusing that instance's window instead of opening a second one.
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    const [win] = BrowserWindow.getAllWindows()
+    if (win) {
+      if (win.isMinimized()) win.restore()
+      win.focus()
+    }
   })
-})
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
-})
+  void app.whenReady().then(() => {
+    getDb()
+    registerIpcHandlers()
+    createWindow()
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
+  })
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit()
+  })
+}
