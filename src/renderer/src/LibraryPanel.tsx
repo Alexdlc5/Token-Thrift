@@ -52,6 +52,7 @@ function formatSize(bytes: number): string {
 export default function LibraryPanel({ sessionId }: LibraryPanelProps): React.JSX.Element {
   const [items, setItems] = useState<LibraryItem[]>([])
   const [collapsed, setCollapsed] = useState(false)
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
 
   function load(): void {
     window.api.listLibraryItems(sessionId).then(setItems).catch(console.error)
@@ -72,6 +73,18 @@ export default function LibraryPanel({ sessionId }: LibraryPanelProps): React.JS
 
   function handleOpen(id: string): void {
     window.api.openLibraryItem(id).catch((err: unknown) => alert(err instanceof Error ? err.message : String(err)))
+  }
+
+  // Reorders optimistically (instant visual feedback) and persists in the background — a
+  // failed save just means the order resets to the DB's on next load, no need to block on it.
+  function handleDrop(targetIndex: number): void {
+    if (dragIndex === null || dragIndex === targetIndex) return
+    const next = [...items]
+    const [moved] = next.splice(dragIndex, 1)
+    next.splice(targetIndex, 0, moved)
+    setItems(next)
+    setDragIndex(null)
+    window.api.reorderLibraryItems(sessionId, next.map((i) => i.id)).catch(console.error)
   }
 
   return (
@@ -102,7 +115,7 @@ export default function LibraryPanel({ sessionId }: LibraryPanelProps): React.JS
               No files yet — loaded or generated images/PDFs show up here.
             </div>
           )}
-          {items.map((item) => {
+          {items.map((item, index) => {
             const { size, color } = libraryVisual(item.sizeBytes)
             const kindLabel = item.mimeType.startsWith('image/') ? 'IMG' : item.mimeType === 'application/pdf' ? 'PDF' : 'FILE'
             return (
@@ -110,16 +123,26 @@ export default function LibraryPanel({ sessionId }: LibraryPanelProps): React.JS
                 key={item.id}
                 onClick={() => handleOpen(item.id)}
                 title={item.fileName}
+                draggable
+                onDragStart={() => setDragIndex(index)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  handleDrop(index)
+                }}
+                onDragEnd={() => setDragIndex(null)}
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
                   gap: 4,
                   width: 84,
+                  padding: 0,
                   background: 'none',
                   border: 'none',
-                  cursor: 'pointer',
-                  color: '#eee'
+                  cursor: 'grab',
+                  color: '#eee',
+                  opacity: dragIndex === index ? 0.4 : 1
                 }}
               >
                 <span

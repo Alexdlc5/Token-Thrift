@@ -1,4 +1,10 @@
-import type { ChatStreamChunk, ChatStreamDone, ChatStreamError, LibraryUpdated } from './ipc-contract'
+import type {
+  ChatStreamChunk,
+  ChatStreamDone,
+  ChatStreamError,
+  ChatStreamRetry,
+  LibraryUpdated
+} from './ipc-contract'
 import type {
   ChatMessage,
   LibraryItem,
@@ -67,9 +73,14 @@ export interface TokenThriftApi {
   listLibraryItems(sessionId: string): Promise<LibraryItem[]>
   /** Opens a library file with the OS default handler (shell.openPath). */
   openLibraryItem(id: string): Promise<void>
+  /** Persists a manual drag-and-drop order for a session's library grid. */
+  reorderLibraryItems(sessionId: string, orderedIds: string[]): Promise<void>
 
   onTaskUpdate(cb: (task: TaskRow) => void): () => void
   onChatChunk(cb: (evt: ChatStreamChunk) => void): () => void
+  /** A provider/model call failed and a fallback attempt is starting — discard any partial
+   * text shown for this task and go back to just the thinking indicator. */
+  onChatRetry(cb: (evt: ChatStreamRetry) => void): () => void
   onChatDone(cb: (evt: ChatStreamDone) => void): () => void
   onChatError(cb: (evt: ChatStreamError) => void): () => void
   onLibraryUpdated(cb: (evt: LibraryUpdated) => void): () => void

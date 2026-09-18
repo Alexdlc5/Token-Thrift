@@ -213,6 +213,9 @@ export function deleteSession(id: string): void {
   try {
     db.prepare(`DELETE FROM messages WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM tasks WHERE session_id = ?`).run(id)
+    // library_items also references sessions(id) — leaving these behind either orphans the
+    // rows or fails the delete outright under FK enforcement.
+    db.prepare(`DELETE FROM library_items WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM sessions WHERE id = ?`).run(id)
     db.exec('COMMIT')
   } catch (err) {
@@ -363,6 +366,7 @@ interface LibraryItemRow {
   size_bytes: number
   description: string | null
   created_at: number
+  sort_order: number
 }
 
 function mapLibraryItem(row: LibraryItemRow): LibraryItem {
@@ -405,10 +409,18 @@ export function addLibraryItem(input: {
 }
 
 export function listLibraryItems(sessionId: string): LibraryItem[] {
+  // sort_order defaults to 0 for every item until the user drags one — ties then fall back to
+  // created_at DESC, so an untouched library looks exactly like it did before this existed.
   const rows = conn()
-    .prepare(`SELECT * FROM library_items WHERE session_id = ? ORDER BY created_at DESC`)
+    .prepare(`SELECT * FROM library_items WHERE session_id = ? ORDER BY sort_order ASC, created_at DESC`)
     .all(sessionId) as unknown as LibraryItemRow[]
   return rows.map(mapLibraryItem)
+}
+
+/** Persists a manual drag-and-drop order — `orderedIds` is the item ids in their new visual order. */
+export function reorderLibraryItems(orderedIds: string[]): void {
+  const stmt = conn().prepare(`UPDATE library_items SET sort_order = ? WHERE id = ?`)
+  orderedIds.forEach((id, index) => stmt.run(index, id))
 }
 
 /** Internal-only (file_path never leaves main) — used to resolve what to hand shell.openPath(). */

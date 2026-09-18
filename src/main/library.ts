@@ -5,7 +5,7 @@
 
 import assert from 'node:assert'
 import { app } from 'electron'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { addLibraryItem, getLibraryItemPath } from './db/repository'
@@ -52,6 +52,12 @@ export function saveToLibrary(
 }
 
 export { getLibraryItemPath }
+
+/** Removes a session's whole library folder from disk — pair with repository.deleteSession(),
+ * which only removes the DB rows. Safe to call even if the session never saved a file. */
+export function deleteLibraryDir(sessionId: string): void {
+  rmSync(libraryDir(sessionId), { recursive: true, force: true })
+}
 
 // --- self-check ---------------------------------------------------------------------
 // Only the pure parsing/sanitizing helpers — saveToLibrary() itself needs a real Electron

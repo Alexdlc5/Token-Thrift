@@ -8,6 +8,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { SCHEMA } from './schema'
 import {
   _setDbForTesting,
+  addLibraryItem,
   addMessage,
   createSession,
   createTask,
@@ -15,12 +16,14 @@ import {
   getSessionDocument,
   getTask,
   isDocumentModeEnabled,
+  listLibraryItems,
   listMessages,
   listMessagesForModel,
   listSessions,
   listTasks,
   markMessagesCompressed,
   renameSession,
+  reorderLibraryItems,
   setDocumentMode,
   setSessionArchived,
   setSessionDocument,
@@ -169,6 +172,39 @@ setSessionDocument(session.id, {
 const fileDoc = getSessionDocument(session.id)
 assert.strictEqual(fileDoc?.kind, 'file')
 assert.strictEqual(fileDoc?.mimeType, 'application/pdf')
+
+// --- library reorder ---
+
+const itemA = addLibraryItem({
+  sessionId: session.id,
+  fileName: 'a.png',
+  filePath: '/tmp/a.png',
+  mimeType: 'image/png',
+  sizeBytes: 100,
+  description: null
+})
+const itemB = addLibraryItem({
+  sessionId: session.id,
+  fileName: 'b.png',
+  filePath: '/tmp/b.png',
+  mimeType: 'image/png',
+  sizeBytes: 100,
+  description: null
+})
+const itemC = addLibraryItem({
+  sessionId: session.id,
+  fileName: 'c.png',
+  filePath: '/tmp/c.png',
+  mimeType: 'image/png',
+  sizeBytes: 100,
+  description: null
+})
+reorderLibraryItems([itemA.id, itemC.id, itemB.id])
+assert.deepStrictEqual(
+  listLibraryItems(session.id).map((i) => i.id),
+  [itemA.id, itemC.id, itemB.id],
+  'explicit order persists and overrides the created_at fallback'
+)
 
 // --- delete ---
 

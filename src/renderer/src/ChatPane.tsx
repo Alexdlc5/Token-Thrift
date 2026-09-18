@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ChatMessage, SessionSummary } from '@shared/models'
 import { PROVIDER_LABELS } from './mockData'
 
@@ -29,12 +29,49 @@ function ThinkingIndicator(): React.JSX.Element {
 
 export default function ChatPane({ session, messages, onSend, isPending }: ChatPaneProps): React.JSX.Element {
   const [draft, setDraft] = useState('')
+  // null = editing a fresh draft; otherwise an index into promptHistory being browsed.
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null)
+  const [draftBeforeHistory, setDraftBeforeHistory] = useState('')
+
+  // Switching sessions invalidates whatever index was being browsed (a different session has
+  // a different history) — drop back to a fresh draft rather than showing the wrong entry.
+  useEffect(() => {
+    setHistoryIndex(null)
+  }, [session?.id])
+
+  // Most recent first, so ArrowUp/scroll-up steps backwards through time like a shell history.
+  const promptHistory = messages
+    .filter((m) => m.role === 'user')
+    .slice(-50)
+    .map((m) => m.content)
+    .reverse()
+
+  function navigateHistory(direction: 'older' | 'newer'): void {
+    if (direction === 'older') {
+      if (promptHistory.length === 0) return
+      if (historyIndex === null) setDraftBeforeHistory(draft)
+      const nextIndex = historyIndex === null ? 0 : Math.min(historyIndex + 1, promptHistory.length - 1)
+      setHistoryIndex(nextIndex)
+      setDraft(promptHistory[nextIndex])
+    } else {
+      if (historyIndex === null) return
+      if (historyIndex === 0) {
+        setHistoryIndex(null)
+        setDraft(draftBeforeHistory)
+      } else {
+        const nextIndex = historyIndex - 1
+        setHistoryIndex(nextIndex)
+        setDraft(promptHistory[nextIndex])
+      }
+    }
+  }
 
   function handleSend(): void {
     const content = draft.trim()
     if (!content) return
     onSend(content)
     setDraft('')
+    setHistoryIndex(null)
   }
 
   if (!session) {
@@ -85,9 +122,23 @@ export default function ChatPane({ session, messages, onSend, isPending }: ChatP
       <div style={{ display: 'flex', gap: 8, padding: 12, borderTop: '1px solid #333' }}>
         <input
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            setDraft(e.target.value)
+            if (historyIndex !== null) setHistoryIndex(null)
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') handleSend()
+            else if (e.key === 'ArrowUp') {
+              e.preventDefault()
+              navigateHistory('older')
+            } else if (e.key === 'ArrowDown') {
+              e.preventDefault()
+              navigateHistory('newer')
+            }
+          }}
+          onWheel={(e) => {
+            if (e.deltaY < 0) navigateHistory('older')
+            else if (e.deltaY > 0) navigateHistory('newer')
           }}
           placeholder="Type a message... (you can send another any time, even mid-response)"
           style={{ flex: 1, padding: 8 }}

@@ -115,6 +115,21 @@ export function sanitizeAssistantText(text: string): string {
     .trim()
 }
 
+/**
+ * Index of the earliest document/image-generation opening tag in an in-progress streamed
+ * response, or -1 if neither has started yet. Lets the caller stop forwarding raw chunks to
+ * the renderer the moment a tag begins — otherwise the user watches the literal
+ * "<generate_image>a crisp glossy red apple..." prompt text type itself out live, instead of
+ * just seeing the thinking indicator until the real result (the generated image, or the
+ * updated document) is ready.
+ */
+export function findEarliestTagStart(text: string): number {
+  const indices = [`<${DOCUMENT_TAG}>`, `<${IMAGE_TAG}>`]
+    .map((tag) => text.indexOf(tag))
+    .filter((i) => i !== -1)
+  return indices.length > 0 ? Math.min(...indices) : -1
+}
+
 interface DocumentContext {
   document: SessionDocument | null
   modeEnabled: boolean
@@ -192,6 +207,12 @@ if (require.main === module) {
     sanitizeAssistantText('Sure thing!<|im_end|> Here is the answer.'),
     'Sure thing! Here is the answer.'
   )
+
+  assert.strictEqual(findEarliestTagStart('just chatting'), -1)
+  assert.strictEqual(findEarliestTagStart('Sure! <generate_image>a red apple'), 6)
+  assert.strictEqual(findEarliestTagStart('Here: <document>\ncontent'), 6)
+  // Both tags present (shouldn't normally happen, but the earliest one wins either way).
+  assert.strictEqual(findEarliestTagStart('a<document>b<generate_image>c'), 1)
 
   console.log('prompt-modules self-check passed')
 }

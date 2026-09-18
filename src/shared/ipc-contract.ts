@@ -42,11 +42,13 @@ export const IPC = {
   },
   library: {
     list: 'library:list',
-    open: 'library:open'
+    open: 'library:open',
+    reorder: 'library:reorder'
   },
   events: {
     taskUpdate: 'event:taskUpdate',
     chatChunk: 'event:chatChunk',
+    chatRetry: 'event:chatRetry',
     chatDone: 'event:chatDone',
     chatError: 'event:chatError',
     libraryUpdated: 'event:libraryUpdated'
@@ -58,6 +60,14 @@ export interface ChatStreamChunk {
   sessionId: string
   channel: 'answer' | 'reasoning'
   delta: string
+}
+
+/** A provider/model call failed and the app is retrying with a different one — the renderer
+ * discards whatever partial text it had shown for this task and goes back to just the
+ * thinking indicator. */
+export interface ChatStreamRetry {
+  taskId: string
+  sessionId: string
 }
 
 export interface ChatStreamDone {

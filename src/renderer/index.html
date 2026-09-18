@@ -23,6 +23,94 @@
           opacity: 1;
         }
       }
+
+      :root {
+        --tt-bg: #15151d;
+        --tt-panel: #1c1c26;
+        --tt-border: #333;
+        --tt-border-light: #3a3a4a;
+        --tt-accent: #4d8ec7;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--tt-bg);
+        color: #eee;
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      }
+
+      button,
+      input,
+      select,
+      textarea {
+        font-family: inherit;
+        font-size: inherit;
+        color: inherit;
+      }
+
+      button {
+        background: #2a2a38;
+        border: 1px solid var(--tt-border-light);
+        border-radius: 6px;
+        padding: 6px 10px;
+        cursor: pointer;
+        transition:
+          background-color 0.15s ease,
+          border-color 0.15s ease;
+      }
+      button:hover:not(:disabled) {
+        background: #34344a;
+        border-color: #52526a;
+      }
+      button:active:not(:disabled) {
+        background: #23232e;
+      }
+      button:disabled {
+        cursor: default;
+        opacity: 0.5;
+      }
+
+      input:not([type='checkbox']):not([type='radio']),
+      select,
+      textarea {
+        background: var(--tt-panel);
+        border: 1px solid var(--tt-border-light);
+        border-radius: 6px;
+        padding: 6px 8px;
+        outline: none;
+        transition: border-color 0.15s ease;
+      }
+      input:not([type='checkbox']):not([type='radio']):focus,
+      select:focus,
+      textarea:focus {
+        border-color: var(--tt-accent);
+      }
+      input[type='checkbox'],
+      input[type='radio'] {
+        accent-color: var(--tt-accent);
+      }
+
+      ::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: var(--tt-border-light);
+        border-radius: 6px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #52526a;
+      }
     </style>
   </head>
   <body>

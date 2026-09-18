@@ -122,8 +122,11 @@ export default function App(): React.JSX.Element {
   // Live streaming events from main, for the whole app's lifetime (not just the active session).
   useEffect(() => {
     const offChunk = window.api.onChatChunk((evt) => {
-      // First real content for this task — the "thinking..." indicator can stop now.
-      clearPending(evt.sessionId)
+      // Only real answer text should stop the "thinking..." indicator — a reasoning-only
+      // chunk was clearing it prematurely (the dot would vanish the instant a reasoning
+      // model started its thinking phase, well before any visible answer content existed,
+      // since reasoning itself isn't rendered in the chat bubble at all).
+      if (evt.channel === 'answer') clearPending(evt.sessionId)
       setMessages((prev) => {
         const existing = prev.find((m) => m.id === evt.taskId)
         if (existing) {
@@ -148,6 +151,16 @@ export default function App(): React.JSX.Element {
         }
         return [...prev, placeholder]
       })
+    })
+
+    const offRetry = window.api.onChatRetry((evt) => {
+      // A fallback attempt is starting after a provider failure — wipe whatever partial
+      // text the failed attempt had streamed in, back to just the thinking indicator, so
+      // the user never sees a half-written response from a call that's being abandoned.
+      setPendingSessionIds((prev) => new Set(prev).add(evt.sessionId))
+      setMessages((prev) =>
+        prev.map((m) => (m.id === evt.taskId ? { ...m, content: '', reasoning: undefined } : m))
+      )
     })
 
     const offDone = window.api.onChatDone((evt) => {
@@ -189,6 +202,7 @@ export default function App(): React.JSX.Element {
 
     return () => {
       offChunk()
+      offRetry()
       offDone()
       offError()
       offLibrary()
@@ -311,7 +325,7 @@ export default function App(): React.JSX.Element {
 
   return (
     <div
-      style={{ display: 'flex', height: '100vh', fontFamily: 'sans-serif', backgroundColor: '#15151d', color: '#eee' }}
+      style={{ display: 'flex', height: '100vh', backgroundColor: '#15151d', color: '#eee' }}
     >
       <Sidebar
         sessions={sessions}

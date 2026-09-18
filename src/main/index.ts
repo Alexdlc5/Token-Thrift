@@ -26,14 +26,15 @@ import {
   buildSystemPrompt,
   extractDocumentUpdate,
   extractImageGenerationRequest,
+  findEarliestTagStart,
   sanitizeAssistantText
 } from './prompt-modules'
 import { fitHistoryToBudget } from './context-window'
 import { maybeCompressSession } from './context-compression'
 import { cloudflareImageProvider } from './image-providers/cloudflare-image'
 import { readImage } from './image-providers/cloudflare-vision'
-import { saveToLibrary, getLibraryItemPath } from './library'
-import { listLibraryItems } from './db/repository'
+import { saveToLibrary, getLibraryItemPath, deleteLibraryDir } from './library'
+import { listLibraryItems, reorderLibraryItems } from './db/repository'
 import {
   addApiKey,
   getActiveKeyId,
@@ -44,7 +45,8 @@ import {
   setActiveApiKey,
   setAllowPaid
 } from './secure-store'
-import type { ModelOverrides, TaskRow } from '@shared/models'
+import type { ModelOverrides, ProviderId, TaskRow } from '@shared/models'
+import type { ProviderChatMessage } from './providers/LLMProvider'
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -76,6 +78,137 @@ function emitTaskUpdate(win: BrowserWindow | null, task: TaskRow): void {
   win?.webContents.send(IPC.events.taskUpdate, task)
 }
 
+interface ChatCandidate {
+  providerId: ProviderId
+  modelId: string
+  contextLength: number
+}
+
+async function buildPrimaryCandidate(session: {
+  providerId: ProviderId
+  modelId: string
+}): Promise<ChatCandidate> {
+  const primaryProvider = getProvider(session.providerId)
+  const primaryModels = primaryProvider ? await primaryProvider.listModels().catch(() => []) : []
+  const contextLength = primaryModels.find((m) => m.modelId === session.modelId)?.contextLength ?? 32_768
+  return { providerId: session.providerId, modelId: session.modelId, contextLength }
+}
+
+// One fallback model from every other provider that has a key configured — only called after
+// the primary attempt fails, so a normal successful send never pays for listing every other
+// provider's models up front.
+async function buildFallbackCandidates(excludeProviderId: ProviderId): Promise<ChatCandidate[]> {
+  const fallbacks: ChatCandidate[] = []
+  for (const provider of listProviders()) {
+    if (provider.id === excludeProviderId || !hasApiKey(provider.id)) continue
+    const models = await provider.listModels().catch(() => [])
+    const allowPaid = getAllowPaid(provider.id)
+    const model = models.find((m) => provider.isFree(m.modelId) || allowPaid)
+    if (model) {
+      fallbacks.push({
+        providerId: provider.id,
+        modelId: model.modelId,
+        contextLength: model.contextLength ?? 32_768
+      })
+    }
+  }
+  return fallbacks
+}
+
+interface StreamAttemptResult {
+  answer: string
+  reasoning: string
+  usage: { promptTokens: number; completionTokens: number } | undefined
+}
+
+// Longest opening tag ("<generate_image>") is 16 chars — hold back that many trailing
+// characters from the renderer at all times so a tag can never leak in partially (e.g.
+// "<gener" forwarded before "ate_image>" arrives in the next chunk).
+const MAX_TAG_PREFIX_LEN = 16
+
+// Runs one provider's streamChat to completion, forwarding live chunks to the renderer except
+// once a document/image-generation tag starts — from that point the user should only see the
+// thinking indicator, never the raw prompt/content being written inside the tag.
+async function streamOneAttempt(
+  candidate: ChatCandidate,
+  history: ProviderChatMessage[],
+  overrides: ModelOverrides | undefined,
+  task: TaskRow,
+  sessionId: string,
+  win: BrowserWindow | null
+): Promise<StreamAttemptResult> {
+  const provider = getProvider(candidate.providerId)
+  if (!provider) throw new Error(`No provider registered for "${candidate.providerId}"`)
+
+  let answer = ''
+  let reasoning = ''
+  let usage: { promptTokens: number; completionTokens: number } | undefined
+  let forwardedLength = 0
+  let tagDetected = false
+
+  for await (const part of provider.streamChat(history, {
+    modelId: candidate.modelId,
+    temperature: overrides?.temperature,
+    topP: overrides?.topP,
+    maxTokens: overrides?.maxTokens,
+    reasoningEffort: overrides?.reasoningEffort
+  })) {
+    if (part.type === 'answer') {
+      answer += part.delta
+      if (!tagDetected) {
+        const tagStart = findEarliestTagStart(answer)
+        if (tagStart !== -1) {
+          tagDetected = true
+          const preTag = answer.slice(forwardedLength, tagStart)
+          if (preTag) {
+            win?.webContents.send(IPC.events.chatChunk, {
+              taskId: task.id,
+              sessionId,
+              channel: 'answer',
+              delta: preTag
+            })
+          }
+          forwardedLength = tagStart
+        } else {
+          const safeEnd = Math.max(forwardedLength, answer.length - MAX_TAG_PREFIX_LEN)
+          if (safeEnd > forwardedLength) {
+            win?.webContents.send(IPC.events.chatChunk, {
+              taskId: task.id,
+              sessionId,
+              channel: 'answer',
+              delta: answer.slice(forwardedLength, safeEnd)
+            })
+            forwardedLength = safeEnd
+          }
+        }
+      }
+    } else if (part.type === 'reasoning') {
+      reasoning += part.delta
+      win?.webContents.send(IPC.events.chatChunk, {
+        taskId: task.id,
+        sessionId,
+        channel: 'reasoning',
+        delta: part.delta
+      })
+    } else if (part.type === 'usage') {
+      usage = { promptTokens: part.promptTokens, completionTokens: part.completionTokens }
+    }
+  }
+
+  // Stream ended with no tag ever starting — release the trailing text held back as a
+  // just-in-case buffer against a tag arriving in a later chunk.
+  if (!tagDetected && forwardedLength < answer.length) {
+    win?.webContents.send(IPC.events.chatChunk, {
+      taskId: task.id,
+      sessionId,
+      channel: 'answer',
+      delta: answer.slice(forwardedLength)
+    })
+  }
+
+  return { answer, reasoning, usage }
+}
+
 // Runs one provider streaming call to completion, persisting the assistant message and
 // task-log row and pushing live events to the renderer. Fire-and-forget from the IPC
 // handler's point of view — sendMessage() already returned the taskId by the time this runs.
@@ -105,53 +238,53 @@ async function runChatTask(
 
   emitTaskUpdate(win, updateTask(task.id, { status: 'streaming' }))
 
-  // Fit this request to the active model's real budget — a session's history can run up to
-  // SESSION_TOKEN_CAP tokens (compressed as it grows, see context-compression.ts), but any
-  // one model's actual context window is usually much smaller than that.
-  const modelInfo = (await provider.listModels().catch(() => [])).find(
-    (m) => m.modelId === session.modelId
-  )
-  const contextLength = modelInfo?.contextLength ?? 32_768
-  const reserve = overrides?.maxTokens ?? Math.floor(contextLength * 0.25)
-  const budget = Math.max(1000, contextLength - reserve)
+  // The fallback list (every other configured provider's models) is only fetched after the
+  // primary attempt actually fails — the common case (primary succeeds) never pays for it.
+  let attempts: ChatCandidate[] = [await buildPrimaryCandidate(session)]
 
-  const history = fitHistoryToBudget(listMessagesForModel(sessionId), budget)
-  if (task.systemPrompt) history.unshift({ role: 'system', content: task.systemPrompt })
+  let result: StreamAttemptResult | undefined
+  let lastError = ''
+  let lastProviderId: ProviderId = session.providerId
+  let triedCount = 0
 
-  let answer = ''
-  let reasoning = ''
-  let usage: { promptTokens: number; completionTokens: number } | undefined
+  for (let i = 0; i < attempts.length; i++) {
+    const candidate = attempts[i]
+    if (i > 0) win?.webContents.send(IPC.events.chatRetry, { taskId: task.id, sessionId })
+
+    // Fit this attempt's history to its own model's real budget — a session's history can run
+    // up to SESSION_TOKEN_CAP tokens (compressed as it grows, see context-compression.ts), but
+    // any one model's actual context window is usually much smaller, and a fallback provider's
+    // window can differ a lot from the session's usual one.
+    const reserve = overrides?.maxTokens ?? Math.floor(candidate.contextLength * 0.25)
+    const budget = Math.max(1000, candidate.contextLength - reserve)
+    const history = fitHistoryToBudget(listMessagesForModel(sessionId), budget)
+    if (task.systemPrompt) history.unshift({ role: 'system', content: task.systemPrompt })
+
+    triedCount++
+    try {
+      result = await streamOneAttempt(candidate, history, overrides, task, sessionId, win)
+      break
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err)
+      lastProviderId = candidate.providerId
+      // First failure: now it's worth the cost of finding out what else is available.
+      if (i === 0) attempts = attempts.concat(await buildFallbackCandidates(session.providerId))
+    }
+  }
+
+  if (!result) {
+    const error =
+      triedCount > 1
+        ? `All ${triedCount} providers failed. Last error (${lastProviderId}): ${lastError}`
+        : lastError
+    const failed = updateTask(task.id, { status: 'error', endedAt: Date.now(), error })
+    emitTaskUpdate(win, failed)
+    win?.webContents.send(IPC.events.chatError, { taskId: task.id, sessionId, error })
+    return
+  }
 
   try {
-    for await (const part of provider.streamChat(history, {
-      modelId: session.modelId,
-      temperature: overrides?.temperature,
-      topP: overrides?.topP,
-      maxTokens: overrides?.maxTokens,
-      reasoningEffort: overrides?.reasoningEffort
-    })) {
-      if (part.type === 'answer') {
-        answer += part.delta
-        win?.webContents.send(IPC.events.chatChunk, {
-          taskId: task.id,
-          sessionId,
-          channel: 'answer',
-          delta: part.delta
-        })
-      } else if (part.type === 'reasoning') {
-        reasoning += part.delta
-        win?.webContents.send(IPC.events.chatChunk, {
-          taskId: task.id,
-          sessionId,
-          channel: 'reasoning',
-          delta: part.delta
-        })
-      } else if (part.type === 'usage') {
-        usage = { promptTokens: part.promptTokens, completionTokens: part.completionTokens }
-      }
-    }
-
-    let assistantContent = sanitizeAssistantText(answer)
+    let assistantContent = sanitizeAssistantText(result.answer)
 
     if (overrides?.imageGeneration) {
       const imageRequest = extractImageGenerationRequest(assistantContent)
@@ -195,12 +328,12 @@ async function runChatTask(
       }
     }
 
-    addMessage(sessionId, 'assistant', assistantContent, reasoning || undefined)
+    addMessage(sessionId, 'assistant', assistantContent, result.reasoning || undefined)
     const done = updateTask(task.id, {
       status: 'done',
       endedAt: Date.now(),
-      promptTokens: usage?.promptTokens ?? null,
-      completionTokens: usage?.completionTokens ?? null,
+      promptTokens: result.usage?.promptTokens ?? null,
+      completionTokens: result.usage?.completionTokens ?? null,
       costUsd: 0
     })
     emitTaskUpdate(win, done)
@@ -270,7 +403,10 @@ function registerIpcHandlers(): void {
     updateSessionModel(id, providerId, modelId)
     addMessage(id, 'system', `[Switched to ${providerId} / ${modelId}]`)
   })
-  ipcMain.handle(IPC.session.delete, async (_e, id) => deleteSession(id))
+  ipcMain.handle(IPC.session.delete, async (_e, id) => {
+    deleteSession(id)
+    deleteLibraryDir(id)
+  })
 
   ipcMain.handle(IPC.message.list, async (_e, sessionId) => listMessages(sessionId))
   ipcMain.handle(
@@ -371,6 +507,7 @@ function registerIpcHandlers(): void {
     const result = await shell.openPath(path)
     if (result) throw new Error(`Could not open file: ${result}`)
   })
+  ipcMain.handle(IPC.library.reorder, async (_e, _sessionId, orderedIds) => reorderLibraryItems(orderedIds))
 }
 
 // A second launch (e.g. double-clicking the desktop shortcut while a previous instance is

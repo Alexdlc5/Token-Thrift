@@ -1,6 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/ipc-contract'
-import type { ChatStreamChunk, ChatStreamDone, ChatStreamError, LibraryUpdated } from '@shared/ipc-contract'
+import type {
+  ChatStreamChunk,
+  ChatStreamDone,
+  ChatStreamError,
+  ChatStreamRetry,
+  LibraryUpdated
+} from '@shared/ipc-contract'
 import type { TaskRow } from '@shared/models'
 import type { TokenThriftApi } from '@shared/api'
 
@@ -55,9 +61,12 @@ const api: TokenThriftApi = {
 
   listLibraryItems: (sessionId) => ipcRenderer.invoke(IPC.library.list, sessionId),
   openLibraryItem: (id) => ipcRenderer.invoke(IPC.library.open, id),
+  reorderLibraryItems: (sessionId, orderedIds) =>
+    ipcRenderer.invoke(IPC.library.reorder, sessionId, orderedIds),
 
   onTaskUpdate: (cb) => on<TaskRow>(IPC.events.taskUpdate, cb),
   onChatChunk: (cb) => on<ChatStreamChunk>(IPC.events.chatChunk, cb),
+  onChatRetry: (cb) => on<ChatStreamRetry>(IPC.events.chatRetry, cb),
   onChatDone: (cb) => on<ChatStreamDone>(IPC.events.chatDone, cb),
   onChatError: (cb) => on<ChatStreamError>(IPC.events.chatError, cb),
   onLibraryUpdated: (cb) => on<LibraryUpdated>(IPC.events.libraryUpdated, cb)

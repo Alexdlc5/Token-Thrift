@@ -61,7 +61,8 @@ CREATE TABLE IF NOT EXISTS library_items (
   mime_type TEXT NOT NULL,
   size_bytes INTEGER NOT NULL,
   description TEXT,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_library_session ON library_items(session_id);
 `
@@ -80,7 +81,8 @@ const COLUMN_MIGRATIONS: string[] = [
   'ALTER TABLE sessions ADD COLUMN document_mime_type TEXT',
   'ALTER TABLE sessions ADD COLUMN document_file_name TEXT',
   'ALTER TABLE sessions ADD COLUMN document_updated_at INTEGER',
-  'ALTER TABLE sessions ADD COLUMN document_mode INTEGER NOT NULL DEFAULT 0'
+  'ALTER TABLE sessions ADD COLUMN document_mode INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE library_items ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0'
 ]
 
 export function applyColumnMigrations(database: DatabaseSync): void {
@@ -117,6 +119,7 @@ if (require.main === module) {
     CREATE TABLE sessions (id TEXT PRIMARY KEY, provider_id TEXT, model_id TEXT, title TEXT, created_at INTEGER, archived INTEGER);
     CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, reasoning TEXT, created_at INTEGER);
     CREATE TABLE tasks (id TEXT PRIMARY KEY, session_id TEXT, provider_id TEXT, model_id TEXT, status TEXT, started_at INTEGER);
+    CREATE TABLE library_items (id TEXT PRIMARY KEY, session_id TEXT, file_name TEXT, file_path TEXT, mime_type TEXT, size_bytes INTEGER, description TEXT, created_at INTEGER);
   `)
   oldShapeDb.prepare('INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)').run(
     'm1', 's1', 'user', 'hello', 0
@@ -126,10 +129,12 @@ if (require.main === module) {
   const messageCols = oldShapeDb.prepare('PRAGMA table_info(messages)').all().map((c) => (c as { name: string }).name)
   const taskCols = oldShapeDb.prepare('PRAGMA table_info(tasks)').all().map((c) => (c as { name: string }).name)
   const sessionCols = oldShapeDb.prepare('PRAGMA table_info(sessions)').all().map((c) => (c as { name: string }).name)
+  const libraryCols = oldShapeDb.prepare('PRAGMA table_info(library_items)').all().map((c) => (c as { name: string }).name)
   assert.ok(messageCols.includes('compressed'), 'compressed column added to an old-shape table')
   assert.ok(taskCols.includes('system_prompt'), 'system_prompt column added to an old-shape table')
   assert.ok(sessionCols.includes('document_content'), 'document columns added to an old-shape sessions table')
   assert.ok(sessionCols.includes('document_mode'), 'document_mode column added to an old-shape sessions table')
+  assert.ok(libraryCols.includes('sort_order'), 'sort_order column added to an old-shape library_items table')
   assert.strictEqual(
     oldShapeDb.prepare('SELECT content FROM messages WHERE id = ?').get('m1')?.content,
     'hello',
