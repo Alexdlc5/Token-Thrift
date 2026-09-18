@@ -1,8 +1,50 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { ChatMessage, SessionSummary } from '@shared/models'
 import { PROVIDER_LABELS } from './mockData'
+
+/** Shared by the whole-message copy button and each code block's — `getText` is a lazy
+ * getter (not a plain string) so the code-block variant can read the live DOM at click time
+ * instead of trying to reconstruct source text from react-markdown's children tree. */
+function CopyButton({ getText, style }: { getText: () => string; style?: React.CSSProperties }): React.JSX.Element {
+  const [copied, setCopied] = useState(false)
+
+  function handleClick(): void {
+    navigator.clipboard
+      .writeText(getText())
+      .then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1500)
+      })
+      .catch(console.error)
+  }
+
+  return (
+    <button
+      onClick={handleClick}
+      style={{ fontSize: 10, padding: '2px 6px', lineHeight: 1.4, opacity: copied ? 1 : 0.65, ...style }}
+    >
+      {copied ? 'Copied!' : 'Copy'}
+    </button>
+  )
+}
+
+/** react-markdown's <pre> override for fenced code blocks — inline code (`like this`) never
+ * gets a <pre> wrapper, so this is the one reliable way to target just real code blocks,
+ * language hint or not (a plain ``` block with no language has no distinguishing className). */
+function CodeBlock(props: React.ComponentPropsWithoutRef<'pre'>): React.JSX.Element {
+  const ref = useRef<HTMLPreElement>(null)
+  return (
+    <div style={{ position: 'relative' }}>
+      <pre ref={ref} {...props} />
+      <CopyButton
+        getText={() => ref.current?.textContent ?? ''}
+        style={{ position: 'absolute', top: 6, right: 6 }}
+      />
+    </div>
+  )
+}
 
 interface ChatPaneProps {
   session: SessionSummary | null
@@ -115,9 +157,14 @@ export default function ChatPane({
               padding: '8px 12px'
             }}
           >
-            <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4, textTransform: 'uppercase' }}>{msg.role}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <span style={{ fontSize: 11, opacity: 0.7, textTransform: 'uppercase' }}>{msg.role}</span>
+              <CopyButton getText={() => msg.content} />
+            </div>
             <div className="tt-markdown">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock }}>
+                {msg.content}
+              </ReactMarkdown>
             </div>
           </div>
         ))}
