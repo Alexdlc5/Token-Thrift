@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { ChatMessage, SessionSummary } from '@shared/models'
 import { PROVIDER_LABELS } from './mockData'
 
@@ -105,7 +107,9 @@ export default function ChatPane({ session, messages, onSend, isPending }: ChatP
             }}
           >
             <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4, textTransform: 'uppercase' }}>{msg.role}</div>
-            <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+            <div className="tt-markdown">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+            </div>
           </div>
         ))}
         {isPending && (
