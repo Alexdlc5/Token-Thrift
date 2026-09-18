@@ -143,7 +143,9 @@ function buildFileAgentInstruction(snapshot: WorkingDirectorySnapshot | null): s
       'fully replaces that file. Relative paths only (never absolute or "../"). Keep the ' +
       'PROJECT name identical across a conversation about the same project so later edits ' +
       'land in the same place. Only for actual file creation/changes — not for a single ' +
-      'snippet or explanation.'
+      'snippet or explanation. Do NOT wrap a FILE section in a markdown code fence (no ``` ' +
+      "lines) — the content between FILE markers is written to disk exactly as-is, so a " +
+      'fence line becomes a broken first/last line of the real file.'
   ]
 
   if (snapshot && snapshot.paths.length > 0) {
@@ -166,6 +168,21 @@ function buildFileAgentInstruction(snapshot: WorkingDirectorySnapshot | null): s
   return parts.join('\n\n')
 }
 
+/** Weaker models wrap a FILE's content in a markdown code fence out of habit, even though the
+ * instruction above asks for raw content — left in, the fence lines get written into the
+ * actual file and break it (e.g. a .py file whose first real line is a literal "```python").
+ * Strips a leading fence unconditionally; the trailing one only if present, since a response
+ * cut off mid-generation won't have gotten around to closing it. */
+function stripCodeFence(content: string): string {
+  const lines = content.split('\n')
+  if (lines.length > 0 && /^```\S*$/.test(lines[0].trim())) {
+    lines.shift()
+    if (lines.length > 0 && lines[lines.length - 1].trim() === '```') lines.pop()
+    return lines.join('\n').trim()
+  }
+  return content
+}
+
 /** Splits a `<write_files>` block's inner text on its `### PROJECT:`/`### FILE:` markers.
  * Plain text markers, not JSON — see the comment above buildFileAgentInstruction for why. */
 function parseWriteFilesBlock(inner: string): WriteFilesRequest | null {
@@ -179,7 +196,7 @@ function parseWriteFilesBlock(inner: string): WriteFilesRequest | null {
   const files: { path: string; content: string }[] = []
   for (let i = 1; i < parts.length; i += 2) {
     const path = parts[i].trim()
-    if (path) files.push({ path, content: (parts[i + 1] ?? '').trim() })
+    if (path) files.push({ path, content: stripCodeFence((parts[i + 1] ?? '').trim()) })
   }
   return files.length > 0 ? { project, files } : null
 }
@@ -370,6 +387,20 @@ if (require.main === module) {
   )
   assert.strictEqual(unclosedFiles?.request.project, 'half-done')
   assert.deepStrictEqual(unclosedFiles?.request.files, [{ path: 'index.html', content: '<h1>hi</h1' }])
+
+  // A weak model wrapped a FILE's content in a markdown fence anyway — must not end up as a
+  // literal "```python" line in the actual file written to disk.
+  const fencedFile = extractWriteFilesRequest(
+    '<write_files>\n### PROJECT: oregon-trail\n### FILE: game.py\n```python\nprint("hi")\n```\n</write_files>'
+  )
+  assert.deepStrictEqual(fencedFile?.request.files, [{ path: 'game.py', content: 'print("hi")' }])
+
+  // Same, but cut off mid-generation before the fence ever closed — strip the leading fence
+  // regardless (this is exactly the Oregon Trail bug report: fence present, closer never sent).
+  const fencedUnclosedFile = extractWriteFilesRequest(
+    '<write_files>\n### PROJECT: oregon-trail\n### FILE: game.py\n```python\nprint("hi")'
+  )
+  assert.deepStrictEqual(fencedUnclosedFile?.request.files, [{ path: 'game.py', content: 'print("hi")' }])
 
   // A block with no FILE markers at all isn't a real request — don't hand back an empty
   // project that would just create an empty folder.

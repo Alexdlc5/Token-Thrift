@@ -154,6 +154,18 @@ async function buildFallbackCandidates(excludeProviderId: ProviderId): Promise<C
   return fallbacks
 }
 
+// File-writing responses are inherently long (a whole project's worth of code in one
+// message) — the default response-length cap (see mockData.ts's DEFAULT_OVERRIDES, sized for
+// ordinary chat) was cutting projects off mid-file, which is what "the model doesn't finish
+// what it starts" actually was in practice. Bump the floor only when agent file access is on
+// so ordinary chat keeps its existing, more token-conscious budget.
+const AGENT_FILE_MIN_MAX_TOKENS = 6000
+
+function resolveMaxTokens(overrides: ModelOverrides | undefined): number | undefined {
+  if (!overrides?.agentFileAccess) return overrides?.maxTokens
+  return Math.max(overrides.maxTokens ?? 0, AGENT_FILE_MIN_MAX_TOKENS)
+}
+
 interface StreamAttemptResult {
   answer: string
   reasoning: string
@@ -189,7 +201,7 @@ async function streamOneAttempt(
     modelId: candidate.modelId,
     temperature: overrides?.temperature,
     topP: overrides?.topP,
-    maxTokens: overrides?.maxTokens,
+    maxTokens: resolveMaxTokens(overrides),
     reasoningEffort: overrides?.reasoningEffort
   })) {
     if (part.type === 'answer') {
@@ -294,7 +306,7 @@ async function runChatTask(
     // up to SESSION_TOKEN_CAP tokens (compressed as it grows, see context-compression.ts), but
     // any one model's actual context window is usually much smaller, and a fallback provider's
     // window can differ a lot from the session's usual one.
-    const reserve = overrides?.maxTokens ?? Math.floor(candidate.contextLength * 0.25)
+    const reserve = resolveMaxTokens(overrides) ?? Math.floor(candidate.contextLength * 0.25)
     const budget = Math.max(1000, candidate.contextLength - reserve)
     const history = fitHistoryToBudget(listMessagesForModel(sessionId), budget)
     if (task.systemPrompt) history.unshift({ role: 'system', content: task.systemPrompt })
