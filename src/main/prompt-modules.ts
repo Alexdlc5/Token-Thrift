@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ModelOverrides, SessionDocument } from '@shared/models'
 import type { WorkingDirectorySnapshot, WriteFilesRequest } from './agent-files'
+import type { ProviderChatMessage } from './providers/LLMProvider'
 
 // Resolved lazily inside readModule(), not at module load, so this file stays importable
 // (for extractDocumentUpdate's self-check below) outside a real Electron runtime — matching
@@ -254,6 +255,8 @@ export function sanitizeAssistantText(text: string): string {
     .trim()
 }
 
+const ALL_TAGS = [DOCUMENT_TAG, IMAGE_TAG, WRITE_FILES_TAG, RUN_COMMAND_TAG]
+
 /**
  * Index of the earliest document/image-generation opening tag in an in-progress streamed
  * response, or -1 if neither has started yet. Lets the caller stop forwarding raw chunks to
@@ -263,10 +266,39 @@ export function sanitizeAssistantText(text: string): string {
  * updated document) is ready.
  */
 export function findEarliestTagStart(text: string): number {
-  const indices = [`<${DOCUMENT_TAG}>`, `<${IMAGE_TAG}>`, `<${WRITE_FILES_TAG}>`, `<${RUN_COMMAND_TAG}>`]
-    .map((tag) => text.indexOf(tag))
-    .filter((i) => i !== -1)
+  const indices = ALL_TAGS.map((tag) => text.indexOf(`<${tag}>`)).filter((i) => i !== -1)
   return indices.length > 0 ? Math.min(...indices) : -1
+}
+
+/** True when `text` has an opening tag with no matching close after it — i.e. a response was
+ * cut off mid-tag. Used when a provider failure hands the response to a different provider
+ * mid-task (see buildContinuationMessages/index.ts's runChatTask): the continuation attempt
+ * needs to know from its very first character whether it's still "inside" a tag the user
+ * should never see raw, since that tag was opened by a DIFFERENT attempt's own output, not
+ * anything in this attempt's own stream. */
+export function isInsideOpenTag(text: string): boolean {
+  return ALL_TAGS.some((tag) => {
+    const openIdx = text.lastIndexOf(`<${tag}>`)
+    return openIdx !== -1 && text.indexOf(`</${tag}>`, openIdx) === -1
+  })
+}
+
+/** When a provider fails partway through a response, the failed attempt's partial output
+ * (see index.ts's PartialStreamError) is handed to the next fallback attempt as these two
+ * messages — the standard "continue" pattern: the partial text becomes the assistant's own
+ * prior turn, followed by a plain instruction to keep going. This is what turns a mid-task
+ * provider switch into an actual handoff instead of a blind restart. */
+export function buildContinuationMessages(partialAnswer: string): ProviderChatMessage[] {
+  return [
+    { role: 'assistant', content: partialAnswer },
+    {
+      role: 'user',
+      content:
+        'Continue exactly where you left off — the connection dropped, not something you did. ' +
+        'Do not repeat anything you already wrote, do not restart, and do not acknowledge the ' +
+        'interruption. Just continue the raw response as if there had been no gap.'
+    }
+  ]
 }
 
 interface DocumentContext {
@@ -359,6 +391,24 @@ if (require.main === module) {
   assert.strictEqual(findEarliestTagStart('Sure! <write_files>\n### PROJECT: x'), 6)
   // Both tags present (shouldn't normally happen, but the earliest one wins either way).
   assert.strictEqual(findEarliestTagStart('a<document>b<generate_image>c'), 1)
+
+  assert.strictEqual(isInsideOpenTag('just chatting'), false)
+  assert.strictEqual(isInsideOpenTag('<write_files>\n### PROJECT: x\n### FILE: a.py\nprint(1'), true)
+  assert.strictEqual(
+    isInsideOpenTag('<write_files>\n...\n</write_files>\n\nAll done!'),
+    false,
+    'closed tag, not mid-generation'
+  )
+  assert.strictEqual(isInsideOpenTag('<generate_image>a cat'), true)
+
+  const continuation = buildContinuationMessages('<write_files>\n### PROJECT: x\nprint(1')
+  assert.strictEqual(continuation.length, 2)
+  assert.deepStrictEqual(continuation[0], {
+    role: 'assistant',
+    content: '<write_files>\n### PROJECT: x\nprint(1'
+  })
+  assert.strictEqual(continuation[1].role, 'user')
+  assert.ok(continuation[1].content.toLowerCase().includes('continue'))
 
   assert.strictEqual(extractWriteFilesRequest('just chatting, nothing to build'), null)
 

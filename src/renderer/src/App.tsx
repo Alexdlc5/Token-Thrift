@@ -199,13 +199,11 @@ export default function App(): React.JSX.Element {
     })
 
     const offRetry = window.api.onChatRetry((evt) => {
-      // A fallback attempt is starting after a provider failure — wipe whatever partial
-      // text the failed attempt had streamed in, back to just the thinking indicator, so
-      // the user never sees a half-written response from a call that's being abandoned.
+      // A fallback attempt is starting after a provider failure — main process hands the new
+      // provider whatever the failed one already produced and asks it to continue (see
+      // runChatTask/PartialStreamError in main/index.ts), so keep showing that partial text
+      // rather than wiping it: the next attempt's own chunks pick up right after it.
       setPendingSessionIds((prev) => new Set(prev).add(evt.sessionId))
-      setMessages((prev) =>
-        prev.map((m) => (m.id === evt.taskId ? { ...m, content: '', reasoning: undefined } : m))
-      )
     })
 
     const offDone = window.api.onChatDone((evt) => {
@@ -219,9 +217,12 @@ export default function App(): React.JSX.Element {
     const offError = window.api.onChatError((evt) => {
       clearPending(evt.sessionId)
       const isRateLimit = /\b429\b/.test(evt.error)
+      const isAuthError = /\b401\b/.test(evt.error)
       const content = isRateLimit
         ? `Error: ${evt.error}\n\n_This looks like a rate limit — try switching to a different saved key for this provider (or another provider) in Settings._`
-        : `Error: ${evt.error}`
+        : isAuthError
+          ? `Error: ${evt.error}\n\n_This looks like an invalid or expired API key — check that provider's key in Settings (for Cloudflare Workers AI, it must be saved as "account_id:api_token")._`
+          : `Error: ${evt.error}`
       setMessages((prev) => [
         ...prev,
         {

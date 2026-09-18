@@ -31,12 +31,14 @@ import {
 } from './db/repository'
 import { getProvider, listProviders } from './providers'
 import {
+  buildContinuationMessages,
   buildSystemPrompt,
   extractDocumentUpdate,
   extractImageGenerationRequest,
   extractRunCommandRequest,
   extractWriteFilesRequest,
   findEarliestTagStart,
+  isInsideOpenTag,
   sanitizeAssistantText
 } from './prompt-modules'
 import { fitHistoryToBudget } from './context-window'
@@ -172,6 +174,22 @@ interface StreamAttemptResult {
   usage: { promptTokens: number; completionTokens: number } | undefined
 }
 
+// Thrown when a provider's stream dies partway through (dropped connection, mid-stream error)
+// — carries whatever answer/reasoning text had already been produced, so runChatTask can hand
+// it to the next fallback attempt as a continuation (see buildContinuationMessages in
+// prompt-modules.ts) instead of discarding it and making the next model start the whole
+// response over from nothing. This is the actual fix for "the model doesn't keep working on
+// the same task when it switches providers" — a genuine mid-task handoff, not a blind retry.
+class PartialStreamError extends Error {
+  constructor(
+    message: string,
+    readonly partialAnswer: string,
+    readonly partialReasoning: string
+  ) {
+    super(message)
+  }
+}
+
 // Longest opening tag ("<generate_image>") is 16 chars — hold back that many trailing
 // characters from the renderer at all times so a tag can never leak in partially (e.g.
 // "<gener" forwarded before "ate_image>" arrives in the next chunk).
@@ -180,13 +198,18 @@ const MAX_TAG_PREFIX_LEN = 16
 // Runs one provider's streamChat to completion, forwarding live chunks to the renderer except
 // once a document/image-generation tag starts — from that point the user should only see the
 // thinking indicator, never the raw prompt/content being written inside the tag.
+// `startTagSuppressed` is true when this attempt is continuing a response a PREVIOUS (failed)
+// attempt already opened a tag in — this attempt's own output is then still "inside" that tag
+// from its very first character, even though no opening tag literally appears in this
+// attempt's own stream (see runChatTask).
 async function streamOneAttempt(
   candidate: ChatCandidate,
   history: ProviderChatMessage[],
   overrides: ModelOverrides | undefined,
   task: TaskRow,
   sessionId: string,
-  win: BrowserWindow | null
+  win: BrowserWindow | null,
+  startTagSuppressed = false
 ): Promise<StreamAttemptResult> {
   const provider = getProvider(candidate.providerId)
   if (!provider) throw new Error(`No provider registered for "${candidate.providerId}"`)
@@ -195,55 +218,60 @@ async function streamOneAttempt(
   let reasoning = ''
   let usage: { promptTokens: number; completionTokens: number } | undefined
   let forwardedLength = 0
-  let tagDetected = false
+  let tagDetected = startTagSuppressed
 
-  for await (const part of provider.streamChat(history, {
-    modelId: candidate.modelId,
-    temperature: overrides?.temperature,
-    topP: overrides?.topP,
-    maxTokens: resolveMaxTokens(overrides),
-    reasoningEffort: overrides?.reasoningEffort
-  })) {
-    if (part.type === 'answer') {
-      answer += part.delta
-      if (!tagDetected) {
-        const tagStart = findEarliestTagStart(answer)
-        if (tagStart !== -1) {
-          tagDetected = true
-          const preTag = answer.slice(forwardedLength, tagStart)
-          if (preTag) {
-            win?.webContents.send(IPC.events.chatChunk, {
-              taskId: task.id,
-              sessionId,
-              channel: 'answer',
-              delta: preTag
-            })
-          }
-          forwardedLength = tagStart
-        } else {
-          const safeEnd = Math.max(forwardedLength, answer.length - MAX_TAG_PREFIX_LEN)
-          if (safeEnd > forwardedLength) {
-            win?.webContents.send(IPC.events.chatChunk, {
-              taskId: task.id,
-              sessionId,
-              channel: 'answer',
-              delta: answer.slice(forwardedLength, safeEnd)
-            })
-            forwardedLength = safeEnd
+  try {
+    for await (const part of provider.streamChat(history, {
+      modelId: candidate.modelId,
+      temperature: overrides?.temperature,
+      topP: overrides?.topP,
+      maxTokens: resolveMaxTokens(overrides),
+      reasoningEffort: overrides?.reasoningEffort
+    })) {
+      if (part.type === 'answer') {
+        answer += part.delta
+        if (!tagDetected) {
+          const tagStart = findEarliestTagStart(answer)
+          if (tagStart !== -1) {
+            tagDetected = true
+            const preTag = answer.slice(forwardedLength, tagStart)
+            if (preTag) {
+              win?.webContents.send(IPC.events.chatChunk, {
+                taskId: task.id,
+                sessionId,
+                channel: 'answer',
+                delta: preTag
+              })
+            }
+            forwardedLength = tagStart
+          } else {
+            const safeEnd = Math.max(forwardedLength, answer.length - MAX_TAG_PREFIX_LEN)
+            if (safeEnd > forwardedLength) {
+              win?.webContents.send(IPC.events.chatChunk, {
+                taskId: task.id,
+                sessionId,
+                channel: 'answer',
+                delta: answer.slice(forwardedLength, safeEnd)
+              })
+              forwardedLength = safeEnd
+            }
           }
         }
+      } else if (part.type === 'reasoning') {
+        reasoning += part.delta
+        win?.webContents.send(IPC.events.chatChunk, {
+          taskId: task.id,
+          sessionId,
+          channel: 'reasoning',
+          delta: part.delta
+        })
+      } else if (part.type === 'usage') {
+        usage = { promptTokens: part.promptTokens, completionTokens: part.completionTokens }
       }
-    } else if (part.type === 'reasoning') {
-      reasoning += part.delta
-      win?.webContents.send(IPC.events.chatChunk, {
-        taskId: task.id,
-        sessionId,
-        channel: 'reasoning',
-        delta: part.delta
-      })
-    } else if (part.type === 'usage') {
-      usage = { promptTokens: part.promptTokens, completionTokens: part.completionTokens }
     }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    throw new PartialStreamError(message, answer, reasoning)
   }
 
   // Stream ended with no tag ever starting — release the trailing text held back as a
@@ -294,9 +322,12 @@ async function runChatTask(
   let attempts: ChatCandidate[] = [await buildPrimaryCandidate(session)]
 
   let result: StreamAttemptResult | undefined
-  let lastError = ''
-  let lastProviderId: ProviderId = session.providerId
-  let triedCount = 0
+  // Text a failed attempt had already produced before it died — handed to the NEXT attempt as
+  // a continuation (see buildContinuationMessages) instead of thrown away, so a provider
+  // switch mid-task doesn't restart the response from nothing.
+  let accumulatedAnswer = ''
+  let accumulatedReasoning = ''
+  const failures: { providerId: ProviderId; error: string }[] = []
 
   for (let i = 0; i < attempts.length; i++) {
     const candidate = attempts[i]
@@ -310,14 +341,37 @@ async function runChatTask(
     const budget = Math.max(1000, candidate.contextLength - reserve)
     const history = fitHistoryToBudget(listMessagesForModel(sessionId), budget)
     if (task.systemPrompt) history.unshift({ role: 'system', content: task.systemPrompt })
+    // ponytail: the continuation text is appended after budget-fitting, uncounted against it —
+    // an accurate fix needs real token counting for arbitrary partial output; if this ever
+    // overflows a small model's context window, that attempt just fails and falls through to
+    // the next fallback like any other failure, so it's self-healing, not silent.
+    if (accumulatedAnswer) history.push(...buildContinuationMessages(accumulatedAnswer))
 
-    triedCount++
     try {
-      result = await streamOneAttempt(candidate, history, overrides, task, sessionId, win)
+      const attempt = await streamOneAttempt(
+        candidate,
+        history,
+        overrides,
+        task,
+        sessionId,
+        win,
+        isInsideOpenTag(accumulatedAnswer)
+      )
+      result = {
+        answer: accumulatedAnswer + attempt.answer,
+        reasoning: accumulatedReasoning + attempt.reasoning,
+        usage: attempt.usage
+      }
       break
     } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err)
-      lastProviderId = candidate.providerId
+      if (err instanceof PartialStreamError) {
+        accumulatedAnswer += err.partialAnswer
+        accumulatedReasoning += err.partialReasoning
+      }
+      failures.push({
+        providerId: candidate.providerId,
+        error: err instanceof Error ? err.message : String(err)
+      })
       // First failure: now it's worth the cost of finding out what else is available.
       if (i === 0) attempts = attempts.concat(await buildFallbackCandidates(session.providerId))
     }
@@ -325,9 +379,10 @@ async function runChatTask(
 
   if (!result) {
     const error =
-      triedCount > 1
-        ? `All ${triedCount} providers failed. Last error (${lastProviderId}): ${lastError}`
-        : lastError
+      failures.length > 1
+        ? `All ${failures.length} providers failed:\n` +
+          failures.map((f) => `- ${f.providerId}: ${f.error}`).join('\n')
+        : (failures[0]?.error ?? 'Unknown error')
     const failed = updateTask(task.id, { status: 'error', endedAt: Date.now(), error })
     emitTaskUpdate(win, failed)
     win?.webContents.send(IPC.events.chatError, { taskId: task.id, sessionId, error })
