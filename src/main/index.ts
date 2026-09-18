@@ -12,6 +12,7 @@ import {
   findLibraryLinkByName,
   getSession,
   getSessionDocument,
+  getSessionOverrides,
   isDocumentModeEnabled,
   listMessages,
   listMessagesForModel,
@@ -22,6 +23,7 @@ import {
   setDocumentMode,
   setSessionArchived,
   setSessionDocument,
+  setSessionOverrides,
   updateSessionModel,
   updateTask
 } from './db/repository'
@@ -513,10 +515,15 @@ function registerIpcHandlers(): void {
     setActiveApiKey(providerId, keyId)
   )
 
-  // Per-model overrides (§2.5) aren't persisted yet — no phase in the delegation plan owns
-  // this storage yet. Renderer keeps them in local state in the meantime.
-  ipcMain.handle(IPC.overrides.get, async () => null)
-  ipcMain.handle(IPC.overrides.set, async () => {})
+  // Per-session overrides (temperature, agentFileAccess, etc.) — previously a stub that
+  // never persisted anything (the renderer kept them in local React state only, silently
+  // reset on every restart or session switch, which is exactly why toggling something like
+  // "agent file access" would appear to stop working). Session-scoped, not per-model: a
+  // session already has one fixed provider/model, and overrides go with the conversation.
+  ipcMain.handle(IPC.overrides.get, async (_e, sessionId: string) => getSessionOverrides(sessionId))
+  ipcMain.handle(IPC.overrides.set, async (_e, sessionId: string, overrides: ModelOverrides) =>
+    setSessionOverrides(sessionId, overrides)
+  )
 
   ipcMain.handle(IPC.task.list, async () => listTasks())
 

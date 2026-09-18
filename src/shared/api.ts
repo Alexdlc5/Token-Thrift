@@ -47,12 +47,10 @@ export interface TokenThriftApi {
   removeApiKey(providerId: ProviderId, keyId: string): Promise<void>
   setActiveApiKey(providerId: ProviderId, keyId: string): Promise<void>
 
-  getModelOverrides(providerId: ProviderId, modelId: string): Promise<ModelOverrides | null>
-  setModelOverrides(
-    providerId: ProviderId,
-    modelId: string,
-    overrides: ModelOverrides
-  ): Promise<void>
+  /** null until the user has ever changed an override for this session. Session-scoped, not
+   * per-model — a session already has one fixed provider/model. */
+  getSessionOverrides(sessionId: string): Promise<ModelOverrides | null>
+  setSessionOverrides(sessionId: string, overrides: ModelOverrides): Promise<void>
 
   listTasks(): Promise<TaskRow[]>
 

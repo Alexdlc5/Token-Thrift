@@ -44,10 +44,9 @@ const api: TokenThriftApi = {
   setActiveApiKey: (providerId, keyId) =>
     ipcRenderer.invoke(IPC.provider.setActiveApiKey, providerId, keyId),
 
-  getModelOverrides: (providerId, modelId) =>
-    ipcRenderer.invoke(IPC.overrides.get, providerId, modelId),
-  setModelOverrides: (providerId, modelId, overrides) =>
-    ipcRenderer.invoke(IPC.overrides.set, providerId, modelId, overrides),
+  getSessionOverrides: (sessionId) => ipcRenderer.invoke(IPC.overrides.get, sessionId),
+  setSessionOverrides: (sessionId, overrides) =>
+    ipcRenderer.invoke(IPC.overrides.set, sessionId, overrides),
 
   listTasks: () => ipcRenderer.invoke(IPC.task.list),
 

@@ -11,6 +11,7 @@ import type {
   ChatRole,
   DocumentKind,
   LibraryItem,
+  ModelOverrides,
   ProviderId,
   SessionDocument,
   SessionSummary,
@@ -204,6 +205,25 @@ export function isDocumentModeEnabled(sessionId: string): boolean {
 
 export function setDocumentMode(sessionId: string, enabled: boolean): void {
   conn().prepare(`UPDATE sessions SET document_mode = ? WHERE id = ?`).run(enabled ? 1 : 0, sessionId)
+}
+
+/** Per-session model overrides (temperature, agentFileAccess, etc.) — null until the user has
+ * ever changed one for this session, in which case the renderer falls back to its own
+ * defaults rather than treating null as "all overrides off". */
+export function getSessionOverrides(sessionId: string): ModelOverrides | null {
+  const row = conn().prepare(`SELECT overrides_json FROM sessions WHERE id = ?`).get(sessionId) as
+    | { overrides_json: string | null }
+    | undefined
+  if (!row?.overrides_json) return null
+  try {
+    return JSON.parse(row.overrides_json) as ModelOverrides
+  } catch {
+    return null
+  }
+}
+
+export function setSessionOverrides(sessionId: string, overrides: ModelOverrides): void {
+  conn().prepare(`UPDATE sessions SET overrides_json = ? WHERE id = ?`).run(JSON.stringify(overrides), sessionId)
 }
 
 /** Permanently removes a session and everything under it — irreversible, unlike archiving. */

@@ -15,6 +15,7 @@ import {
   deleteSession,
   findLibraryLinkByName,
   getSessionDocument,
+  getSessionOverrides,
   getTask,
   isDocumentModeEnabled,
   listLibraryItems,
@@ -29,6 +30,7 @@ import {
   setDocumentMode,
   setSessionArchived,
   setSessionDocument,
+  setSessionOverrides,
   updateSessionModel,
   updateTask
 } from './repository'
@@ -174,6 +176,20 @@ setSessionDocument(session.id, {
 const fileDoc = getSessionDocument(session.id)
 assert.strictEqual(fileDoc?.kind, 'file')
 assert.strictEqual(fileDoc?.mimeType, 'application/pdf')
+
+// --- session overrides ---
+// The exact bug this exists for: this used to be a pure no-op stub (nothing ever persisted),
+// so a toggle like agentFileAccess would silently reset on every restart or session switch.
+
+assert.strictEqual(getSessionOverrides(session.id), null, 'no overrides saved yet')
+setSessionOverrides(session.id, { temperature: 0.9, agentFileAccess: true })
+assert.deepStrictEqual(getSessionOverrides(session.id), { temperature: 0.9, agentFileAccess: true })
+setSessionOverrides(session.id, { imageGeneration: false })
+assert.deepStrictEqual(
+  getSessionOverrides(session.id),
+  { imageGeneration: false },
+  'a later save fully replaces the previous overrides, same as the renderer sending its already-merged object'
+)
 
 // --- library reorder ---
 

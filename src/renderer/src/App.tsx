@@ -99,6 +99,20 @@ export default function App(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSessionId])
 
+  // Hydrate this session's saved overrides once, the first time it's opened — previously
+  // these lived only in local state and silently reset on every restart or session switch
+  // (a toggle like "agent file access" would look like it stopped working for no reason).
+  useEffect(() => {
+    if (!activeSessionId || overridesBySession[activeSessionId]) return
+    window.api
+      .getSessionOverrides(activeSessionId)
+      .then((saved) => {
+        if (saved) setOverridesBySession((prev) => ({ ...prev, [activeSessionId]: saved }))
+      })
+      .catch(console.error)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId])
+
   function clearPending(sessionId: string): void {
     setPendingSessionIds((prev) => {
       if (!prev.has(sessionId)) return prev
@@ -306,10 +320,10 @@ export default function App(): React.JSX.Element {
 
   function handleUpdateOverrides(patch: Partial<ModelOverrides>): void {
     if (!activeSessionId) return
-    setOverridesBySession((prev) => ({
-      ...prev,
-      [activeSessionId]: { ...(prev[activeSessionId] || DEFAULT_OVERRIDES), ...patch }
-    }))
+    const sessionId = activeSessionId
+    const merged = { ...(overridesBySession[sessionId] || DEFAULT_OVERRIDES), ...patch }
+    setOverridesBySession((prev) => ({ ...prev, [sessionId]: merged }))
+    window.api.setSessionOverrides(sessionId, merged).catch(console.error)
   }
 
   return (
