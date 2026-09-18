@@ -95,6 +95,15 @@ async function callVisionModel(accountId: string, apiToken: string, dataUrl: str
   })
 }
 
+// `result.response` is documented as a plain string, but a multimodal request has been
+// observed coming back with it as a parsed object instead (e.g. the model's requested-JSON
+// output arriving pre-parsed rather than as text) — stringify anything non-string rather
+// than assuming the schema always holds, same "degrade gracefully" spirit as parseVisionResponse.
+export function normalizeVisionContent(raw: unknown): string {
+  if (typeof raw === 'string') return raw
+  return raw ? JSON.stringify(raw) : ''
+}
+
 export async function readImage(dataUrl: string): Promise<ImageReadResult> {
   const { accountId, apiToken } = parseStoredKey(getApiKey('cloudflare-workers-ai'))
 
@@ -114,15 +123,26 @@ export async function readImage(dataUrl: string): Promise<ImageReadResult> {
   if (!res.ok) {
     throw new Error(`Image read failed: ${res.status} ${res.statusText}`)
   }
-  const body = (await res.json()) as { result?: { response?: string } }
-  const content = body.result?.response
+  const body = (await res.json()) as { result?: { response?: unknown } }
+  const content = normalizeVisionContent(body.result?.response)
   if (!content) throw new Error('Image read failed: empty response')
   return parseVisionResponse(content)
 }
 
 // --- self-check ---------------------------------------------------------------------
-// Only parseVisionResponse — readImage() needs a real key/network call.
+// parseVisionResponse and normalizeVisionContent — readImage() itself needs a real key/network call.
 if (require.main === module) {
+  assert.strictEqual(normalizeVisionContent('already a string'), 'already a string')
+  assert.strictEqual(normalizeVisionContent(null), '')
+  assert.strictEqual(normalizeVisionContent(undefined), '')
+  // The exact bug this exists for: an API response with `response` as a parsed object
+  // instead of a JSON string — must not throw, and must still round-trip through
+  // parseVisionResponse into the real fields instead of landing in its fallback branch.
+  const objectResponse = { text: 'HI', objects: ['cat'], description: 'A cat.' }
+  const normalized = normalizeVisionContent(objectResponse)
+  assert.strictEqual(typeof normalized, 'string')
+  assert.deepStrictEqual(parseVisionResponse(normalized), objectResponse)
+
   const clean = parseVisionResponse('{"text":"HELLO","objects":["mug","laptop"],"description":"A desk with a mug and a laptop."}')
   assert.deepStrictEqual(clean, { text: 'HELLO', objects: ['mug', 'laptop'], description: 'A desk with a mug and a laptop.' })
 
