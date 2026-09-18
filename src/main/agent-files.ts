@@ -12,9 +12,9 @@
 
 import assert from 'node:assert'
 import { app } from 'electron'
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve, sep } from 'node:path'
+import { dirname, extname, join, relative, resolve, sep } from 'node:path'
 import { sanitizeFileName } from './library'
 
 export interface WriteFilesRequest {
@@ -27,7 +27,9 @@ export interface WriteFilesResult {
   totalBytes: number
 }
 
-function projectsRoot(): string {
+/** The default shared root when the user hasn't picked a specific working directory —
+ * exported so main/index.ts can snapshot the right folder even when agentWorkingDir is unset. */
+export function projectsRoot(): string {
   return join(app.getPath('documents'), 'Token Thrift Projects')
 }
 
@@ -70,9 +72,24 @@ function resolveNewProjectDir(root: string, name: string): string {
   }
 }
 
-/** The actual write logic, taking the projects root as a parameter instead of resolving it
- * from app.getPath('documents') itself — keeps this self-checkable without a real Electron
- * app, same reasoning as every other main-process module's pure/impure split. */
+/** Writes every file straight into `dir` (creating it, and any nested parent directories,
+ * as needed) and reports its new total size. The one place that actually touches disk. */
+function writeFilesDirectlyInto(dir: string, request: WriteFilesRequest): WriteFilesResult {
+  mkdirSync(dir, { recursive: true })
+  for (const file of request.files) {
+    const fullPath = safeJoin(dir, file.path)
+    mkdirSync(dirname(fullPath), { recursive: true })
+    writeFileSync(fullPath, file.content, 'utf8')
+  }
+  return { projectPath: dir, totalBytes: folderSizeBytes(dir) }
+}
+
+/** Resolves which directory a project belongs in, then writes it — taking the projects root
+ * as a parameter instead of resolving it from app.getPath('documents') itself, keeping this
+ * self-checkable without a real Electron app, same reasoning as every other main-process
+ * module's pure/impure split. `existingPath` is reused only if it still exists (the linked
+ * folder may have been deleted externally since); otherwise a fresh, non-colliding folder is
+ * picked under `root`. */
 export function writeProjectFilesInto(
   root: string,
   request: WriteFilesRequest,
@@ -80,21 +97,89 @@ export function writeProjectFilesInto(
 ): WriteFilesResult {
   const name = sanitizeFileName(request.project)
   const projectDir = existingPath && existsSync(existingPath) ? existingPath : resolveNewProjectDir(root, name)
-
-  mkdirSync(projectDir, { recursive: true })
-  for (const file of request.files) {
-    const fullPath = safeJoin(projectDir, file.path)
-    mkdirSync(dirname(fullPath), { recursive: true })
-    writeFileSync(fullPath, file.content, 'utf8')
-  }
-
-  return { projectPath: projectDir, totalBytes: folderSizeBytes(projectDir) }
+  return writeFilesDirectlyInto(projectDir, request)
 }
 
-/** `existingPath` is the current link's path when resuming a project across turns (see
- * findLibraryLinkByName in db/repository.ts) — null creates a fresh one. */
-export function writeProjectFiles(request: WriteFilesRequest, existingPath: string | null): WriteFilesResult {
+/**
+ * `existingPath` is the current link's path when resuming a project across turns (see
+ * findLibraryLinkByName in db/repository.ts) — null creates a fresh one under the shared
+ * default root. `customWorkingDir` (from ModelOverrides.agentWorkingDir) changes this: when
+ * set, that exact folder is always the target (created if it doesn't exist yet), never a
+ * subfolder nested inside it — picking a specific folder is normally "work inside my
+ * project", not "start a new one nested inside it".
+ */
+export function writeProjectFiles(
+  request: WriteFilesRequest,
+  existingPath: string | null,
+  customWorkingDir?: string | null
+): WriteFilesResult {
+  const trimmedCustomDir = customWorkingDir?.trim()
+  if (trimmedCustomDir) return writeFilesDirectlyInto(trimmedCustomDir, request)
   return writeProjectFilesInto(projectsRoot(), request, existingPath)
+}
+
+// "Expand the access" — the model previously only ever wrote blind, with no idea what (if
+// anything) already existed in its working directory. There's no native tool-calling to let
+// it ask for a file's contents mid-response (same constraint as everywhere else in this app),
+// so instead the working directory's current state is folded into the system prompt up front:
+// every relative path, plus the full contents of small text files. Noisy/generated
+// directories are skipped, and both the per-file and total content budgets are capped so a
+// large existing project doesn't blow out the request's token budget.
+const SNAPSHOT_SKIP_DIRS = new Set([
+  'node_modules',
+  '.git',
+  'dist',
+  'out',
+  'build',
+  '.next',
+  'target',
+  'venv',
+  '.venv',
+  '__pycache__'
+])
+const SNAPSHOT_TEXT_EXTENSIONS = new Set([
+  '.js', '.jsx', '.ts', '.tsx', '.json', '.md', '.txt', '.html', '.css', '.py', '.java',
+  '.c', '.cpp', '.h', '.go', '.rs', '.rb', '.php', '.yml', '.yaml', '.toml', '.sh', '.bat'
+])
+const SNAPSHOT_MAX_FILE_CHARS = 4000
+const SNAPSHOT_MAX_TOTAL_CHARS = 8000
+
+export interface WorkingDirectorySnapshot {
+  /** Every file's path relative to the working directory, so the model can reference real
+   * paths even for files whose content wasn't small enough to include below. */
+  paths: string[]
+  excerpts: { path: string; content: string }[]
+}
+
+function walkForSnapshot(dir: string, root: string, paths: string[]): void {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      if (SNAPSHOT_SKIP_DIRS.has(entry.name)) continue
+      walkForSnapshot(join(dir, entry.name), root, paths)
+    } else {
+      paths.push(relative(root, join(dir, entry.name)))
+    }
+  }
+}
+
+/** null when `root` doesn't exist yet (a brand-new working directory, or the default project
+ * folder before the agent has ever written anything into it) — nothing to snapshot. */
+export function snapshotWorkingDirectory(root: string): WorkingDirectorySnapshot | null {
+  if (!existsSync(root)) return null
+  const paths: string[] = []
+  walkForSnapshot(root, root, paths)
+
+  let budget = SNAPSHOT_MAX_TOTAL_CHARS
+  const excerpts: { path: string; content: string }[] = []
+  for (const path of paths) {
+    if (budget <= 0) break
+    if (!SNAPSHOT_TEXT_EXTENSIONS.has(extname(path))) continue
+    const content = readFileSync(join(root, path), 'utf8')
+    if (content.length > SNAPSHOT_MAX_FILE_CHARS) continue
+    excerpts.push({ path, content: content.slice(0, budget) })
+    budget -= content.length
+  }
+  return { paths, excerpts }
 }
 
 // --- self-check ---------------------------------------------------------------------
@@ -146,6 +231,54 @@ if (require.main === module) {
     'a file path escaping its own project directory is refused, not written'
   )
   assert.ok(!existsSync(join(testRoot, '..', 'escaped.txt')), 'the escaping write never actually happened')
+
+  // A custom working directory is written into directly — no per-project subfolder nesting,
+  // even though the model still supplies (and this ignores) its own "project" name, and even
+  // when the folder doesn't exist yet.
+  const customDir = join(testRoot, 'my-existing-repo')
+  const customResult = writeProjectFiles(
+    { project: 'whatever the model called it', files: [{ path: 'index.js', content: 'console.log(1)' }] },
+    null,
+    customDir
+  )
+  assert.strictEqual(customResult.projectPath, customDir, 'writes straight into the configured folder, not a subfolder')
+  assert.ok(existsSync(join(customDir, 'index.js')))
+
+  // A second call with a different (ignored) project name still lands in the same folder and
+  // adds to it, rather than creating a sibling.
+  const customResult2 = writeProjectFiles(
+    { project: 'a totally different name', files: [{ path: 'style.css', content: 'body{}' }] },
+    null,
+    customDir
+  )
+  assert.strictEqual(customResult2.projectPath, customDir)
+  assert.ok(existsSync(join(customDir, 'index.js')), 'earlier file in the same folder survives')
+  assert.ok(existsSync(join(customDir, 'style.css')))
+
+  // --- snapshotWorkingDirectory ---
+
+  assert.strictEqual(snapshotWorkingDirectory(join(testRoot, 'does-not-exist')), null)
+
+  const snapshot = snapshotWorkingDirectory(customDir)
+  assert.deepStrictEqual(snapshot?.paths.sort(), ['index.js', 'style.css'])
+  const excerptPaths = snapshot?.excerpts.map((e) => e.path).sort()
+  assert.deepStrictEqual(excerptPaths, ['index.js', 'style.css'], 'small text files get their content included')
+  assert.strictEqual(snapshot?.excerpts.find((e) => e.path === 'index.js')?.content, 'console.log(1)')
+
+  const skipDir = join(testRoot, 'skip-test')
+  mkdirSync(join(skipDir, 'node_modules', 'dep'), { recursive: true })
+  writeFileSync(join(skipDir, 'node_modules', 'dep', 'index.js'), 'ignored', 'utf8')
+  writeFileSync(join(skipDir, 'real.js'), 'kept', 'utf8')
+  const skipSnapshot = snapshotWorkingDirectory(skipDir)
+  assert.deepStrictEqual(skipSnapshot?.paths, ['real.js'], 'noisy directories like node_modules are skipped entirely')
+
+  const bigDir = join(testRoot, 'big-file-test')
+  mkdirSync(bigDir, { recursive: true })
+  writeFileSync(join(bigDir, 'huge.js'), 'x'.repeat(SNAPSHOT_MAX_FILE_CHARS + 1), 'utf8')
+  writeFileSync(join(bigDir, 'binary.png'), 'not really png bytes', 'utf8')
+  const bigSnapshot = snapshotWorkingDirectory(bigDir)
+  assert.deepStrictEqual(bigSnapshot?.paths.sort(), ['binary.png', 'huge.js'], 'still listed even when skipped')
+  assert.deepStrictEqual(bigSnapshot?.excerpts, [], 'oversized file and non-text extension both excluded from content')
 
   rmSync(testRoot, { recursive: true, force: true })
   console.log('agent-files self-check passed')

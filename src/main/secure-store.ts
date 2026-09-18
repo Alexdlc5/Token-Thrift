@@ -12,7 +12,7 @@ import { app, safeStorage } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ProviderId, StoredKeyInfo } from '@shared/models'
+import type { ModelOverrides, ProviderId, StoredKeyInfo } from '@shared/models'
 
 interface StoredKeyRecord extends StoredKeyInfo {
   encryptedKey: string
@@ -23,6 +23,10 @@ interface SettingsSchema {
   keysByProvider: Record<string, StoredKeyRecord[]>
   activeKeyId: Record<string, string>
   allowPaid: Record<string, boolean>
+  /** Seeds a brand-new session's overrides (see App.tsx) — separate from each session's own
+   * saved overrides, and only changed when the user explicitly asks to save one as the
+   * default, not on every per-session tweak. */
+  defaultOverrides?: ModelOverrides
 }
 
 interface LegacySettingsSchema {
@@ -138,4 +142,14 @@ export function setAllowPaid(providerId: ProviderId, allow: boolean): void {
 
 export function getAllowPaid(providerId: ProviderId): boolean {
   return readSettings().allowPaid[providerId] ?? false
+}
+
+export function setDefaultOverrides(overrides: ModelOverrides): void {
+  const settings = readSettings()
+  settings.defaultOverrides = overrides
+  writeSettings(settings)
+}
+
+export function getDefaultOverrides(): ModelOverrides | null {
+  return readSettings().defaultOverrides ?? null
 }

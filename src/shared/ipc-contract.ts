@@ -28,10 +28,15 @@ export const IPC = {
   },
   overrides: {
     get: 'overrides:get',
-    set: 'overrides:set'
+    set: 'overrides:set',
+    getDefault: 'overrides:getDefault',
+    setDefault: 'overrides:setDefault'
   },
   task: {
     list: 'task:list'
+  },
+  system: {
+    pickFolder: 'system:pickFolder'
   },
   document: {
     get: 'document:get',

@@ -2,6 +2,15 @@ import { useState } from 'react'
 import type { ModelOverrides, ProviderId, SessionSummary, StoredKeyInfo } from '@shared/models'
 import { ALL_PROVIDERS, PROVIDER_LABELS } from './mockData'
 
+function handlePickWorkingDir(onUpdateOverrides: (patch: Partial<ModelOverrides>) => void): void {
+  window.api
+    .pickFolder()
+    .then((path) => {
+      if (path) onUpdateOverrides({ agentWorkingDir: path })
+    })
+    .catch(console.error)
+}
+
 interface SettingsScreenProps {
   apiKeysByProvider: Record<ProviderId, StoredKeyInfo[]>
   activeKeyByProvider: Record<ProviderId, string | null>
@@ -13,6 +22,7 @@ interface SettingsScreenProps {
   activeSession: SessionSummary | null
   overrides: ModelOverrides
   onUpdateOverrides: (patch: Partial<ModelOverrides>) => void
+  onSaveAsDefaultOverrides: (overrides: ModelOverrides) => void
 }
 
 function ProviderKeysCard({
@@ -133,7 +143,8 @@ export default function SettingsScreen({
   onSetAllowPaid,
   activeSession,
   overrides,
-  onUpdateOverrides
+  onUpdateOverrides,
+  onSaveAsDefaultOverrides
 }: SettingsScreenProps): React.JSX.Element {
   return (
     <div style={{ padding: 24, overflowY: 'auto', height: '100%' }}>
@@ -251,8 +262,34 @@ export default function SettingsScreen({
               checked={overrides.agentFileAccess ?? false}
               onChange={(e) => onUpdateOverrides({ agentFileAccess: e.target.checked })}
             />
-            Agent file access — let the model write real projects to your Documents folder
+            Agent file access — let the model write (and read) real project files
           </label>
+          {overrides.agentFileAccess && (
+            <div style={{ marginTop: 8, marginLeft: 22 }}>
+              <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 4 }}>
+                Working directory — the model reads and writes only inside this folder. Leave
+                blank to use a "Token Thrift Projects" folder under Documents, with one
+                subfolder per project.
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  value={overrides.agentWorkingDir ?? ''}
+                  onChange={(e) => onUpdateOverrides({ agentWorkingDir: e.target.value })}
+                  placeholder="Default: Documents/Token Thrift Projects"
+                  style={{ flex: 1, padding: 6, fontSize: 12 }}
+                />
+                <button onClick={() => handlePickWorkingDir(onUpdateOverrides)} style={{ fontSize: 12 }}>
+                  Browse…
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid #333' }}>
+            <button onClick={() => onSaveAsDefaultOverrides(overrides)} style={{ fontSize: 12 }}>
+              Save as default for new sessions
+            </button>
+          </div>
         </div>
       )}
     </div>

@@ -78,6 +78,11 @@ export interface ModelOverrides {
    * convention (see main/agent-files.ts) — off by default, unlike imageGeneration, since it
    * touches the real filesystem outside the app's own sandboxed library storage. */
   agentFileAccess?: boolean
+  /** Where agentFileAccess writes/reads — an absolute path the user picked. Empty/unset falls
+   * back to a per-project subfolder under the user's Documents folder (see agent-files.ts).
+   * When set, this exact folder is the target (no per-project subfolder nesting) — picking a
+   * specific folder is usually "work inside my existing project", not "start a new one". */
+  agentWorkingDir?: string
 }
 
 export interface ProviderStatus {

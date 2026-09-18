@@ -47,6 +47,10 @@ const api: TokenThriftApi = {
   getSessionOverrides: (sessionId) => ipcRenderer.invoke(IPC.overrides.get, sessionId),
   setSessionOverrides: (sessionId, overrides) =>
     ipcRenderer.invoke(IPC.overrides.set, sessionId, overrides),
+  getDefaultOverrides: () => ipcRenderer.invoke(IPC.overrides.getDefault),
+  saveAsDefaultOverrides: (overrides) => ipcRenderer.invoke(IPC.overrides.setDefault, overrides),
+
+  pickFolder: () => ipcRenderer.invoke(IPC.system.pickFolder),
 
   listTasks: () => ipcRenderer.invoke(IPC.task.list),
 

@@ -264,6 +264,13 @@ export default function App(): React.JSX.Element {
         setSessions((prev) => [session, ...prev])
         setActiveSessionId(session.id)
         setView('chat')
+        // Seed from the user's saved default overrides (if they've ever saved one) instead
+        // of always starting a fresh session from the hardcoded app defaults.
+        return window.api.getDefaultOverrides().then((defaults) => {
+          if (!defaults) return
+          setOverridesBySession((prev) => ({ ...prev, [session.id]: defaults }))
+          window.api.setSessionOverrides(session.id, defaults).catch(console.error)
+        })
       })
       .catch(console.error)
       .finally(() => {
@@ -326,6 +333,12 @@ export default function App(): React.JSX.Element {
     window.api.setSessionOverrides(sessionId, merged).catch(console.error)
   }
 
+  // A deliberate save (the "Save as default" button), not fired on every per-session tweak —
+  // only changes what a brand-new session is seeded with going forward.
+  function handleSaveAsDefaultOverrides(overrides: ModelOverrides): void {
+    window.api.saveAsDefaultOverrides(overrides).catch(console.error)
+  }
+
   return (
     <div
       style={{ display: 'flex', height: '100vh', backgroundColor: '#15151d', color: '#eee' }}
@@ -383,6 +396,7 @@ export default function App(): React.JSX.Element {
               activeSession={activeSession}
               overrides={activeOverrides}
               onUpdateOverrides={handleUpdateOverrides}
+              onSaveAsDefaultOverrides={handleSaveAsDefaultOverrides}
             />
           )}
         </div>

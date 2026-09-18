@@ -51,6 +51,13 @@ export interface TokenThriftApi {
    * per-model — a session already has one fixed provider/model. */
   getSessionOverrides(sessionId: string): Promise<ModelOverrides | null>
   setSessionOverrides(sessionId: string, overrides: ModelOverrides): Promise<void>
+  /** Seeds every brand-new session's overrides going forward — a deliberate save, not touched
+   * by ordinary per-session edits. null until the user has ever saved one. */
+  getDefaultOverrides(): Promise<ModelOverrides | null>
+  saveAsDefaultOverrides(overrides: ModelOverrides): Promise<void>
+
+  /** Native OS folder-picker dialog — null if the user cancelled it. */
+  pickFolder(): Promise<string | null>
 
   listTasks(): Promise<TaskRow[]>
 

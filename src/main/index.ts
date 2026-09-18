@@ -1,5 +1,5 @@
-import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
-import { join } from 'node:path'
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron'
+import { basename, join } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import { IPC } from '@shared/ipc-contract'
 import { getDb } from './db/schema'
@@ -40,18 +40,20 @@ import { fitHistoryToBudget } from './context-window'
 import { maybeCompressSession } from './context-compression'
 import { cloudflareImageProvider } from './image-providers/cloudflare-image'
 import { readImage } from './image-providers/cloudflare-vision'
-import { folderSizeBytes, writeProjectFiles } from './agent-files'
+import { folderSizeBytes, projectsRoot, snapshotWorkingDirectory, writeProjectFiles } from './agent-files'
 import { saveToLibrary, getLibraryItemPath, deleteLibraryDir } from './library'
 import { listLibraryItems, reorderLibraryItems } from './db/repository'
 import {
   addApiKey,
   getActiveKeyId,
   getAllowPaid,
+  getDefaultOverrides,
   hasApiKey,
   listApiKeys,
   removeApiKey,
   setActiveApiKey,
-  setAllowPaid
+  setAllowPaid,
+  setDefaultOverrides
 } from './secure-store'
 import type { ModelOverrides, ProviderId, TaskRow } from '@shared/models'
 import type { ProviderChatMessage } from './providers/LLMProvider'
@@ -345,17 +347,22 @@ async function runChatTask(
       if (filesRequest) {
         assistantContent = filesRequest.remainder
         try {
-          // Same project name as an earlier link in this session resumes into its existing
-          // folder (a follow-up "now add X") instead of creating a duplicate.
-          const existingLink = findLibraryLinkByName(sessionId, filesRequest.request.project)
+          const customDir = overrides.agentWorkingDir?.trim() || null
+          // A custom working directory is always the target regardless of the model's chosen
+          // project name (see writeProjectFiles) — key the library link by the folder's own
+          // name instead, so a resumed conversation reuses the same link no matter what name
+          // the model picks that turn. Without a custom dir, the model's project name is the
+          // only way to tell which auto-created subfolder a follow-up belongs to.
+          const linkName = customDir ? basename(customDir) : filesRequest.request.project
+          const existingLink = findLibraryLinkByName(sessionId, linkName)
           const existingPath = existingLink ? (getLibraryItemPath(existingLink.id) ?? null) : null
-          const { projectPath, totalBytes } = writeProjectFiles(filesRequest.request, existingPath)
+          const { projectPath, totalBytes } = writeProjectFiles(filesRequest.request, existingPath, customDir)
           if (existingLink) {
             relinkLibraryItem(existingLink.id, projectPath, totalBytes)
           } else {
             addLibraryItem({
               sessionId,
-              fileName: filesRequest.request.project,
+              fileName: linkName,
               filePath: projectPath,
               mimeType: 'inode/directory',
               sizeBytes: totalBytes,
@@ -365,9 +372,9 @@ async function runChatTask(
           }
           win?.webContents.send(IPC.events.libraryUpdated, { sessionId })
           const fileList = filesRequest.request.files.map((f) => f.path).join(', ')
+          const location = customDir ? projectPath : 'your Documents folder'
           assistantContent =
-            assistantContent ||
-            `_Wrote "${filesRequest.request.project}" (${fileList}) to your Documents folder — see the library below._`
+            assistantContent || `_Wrote "${linkName}" (${fileList}) to ${location} — see the library below._`
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
           assistantContent = [assistantContent, `_Writing files failed: ${message}_`].filter(Boolean).join('\n\n')
@@ -469,12 +476,20 @@ function registerIpcHandlers(): void {
       // but the model still needs to know it exists so it doesn't deny having one at all.
       const document = getSessionDocument(sessionId)
 
+      // Snapshot the agent's working directory (real file listing + small text file
+      // contents) so it can write into an existing project accurately instead of only ever
+      // scaffolding blind — see agent-files.ts's snapshotWorkingDirectory for the budget/
+      // skip-list details. Only worth the disk walk when the override is actually on.
+      const workingDirSnapshot = overrides?.agentFileAccess
+        ? snapshotWorkingDirectory(overrides.agentWorkingDir?.trim() || projectsRoot())
+        : null
+
       const task = createTask({
         parentTaskId: null,
         sessionId,
         providerId: session.providerId,
         modelId: session.modelId,
-        systemPrompt: buildSystemPrompt(overrides, { document, modeEnabled })
+        systemPrompt: buildSystemPrompt(overrides, { document, modeEnabled }, workingDirSnapshot)
       })
 
       const win = BrowserWindow.fromWebContents(event.sender)
@@ -524,6 +539,18 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.overrides.set, async (_e, sessionId: string, overrides: ModelOverrides) =>
     setSessionOverrides(sessionId, overrides)
   )
+  // A deliberate, explicit save (a button in Settings) rather than every per-session tweak —
+  // seeds brand-new sessions going forward, doesn't retroactively touch existing ones.
+  ipcMain.handle(IPC.overrides.getDefault, async () => getDefaultOverrides())
+  ipcMain.handle(IPC.overrides.setDefault, async (_e, overrides: ModelOverrides) => setDefaultOverrides(overrides))
+
+  ipcMain.handle(IPC.system.pickFolder, async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const result = win
+      ? await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] })
+      : await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
 
   ipcMain.handle(IPC.task.list, async () => listTasks())
 

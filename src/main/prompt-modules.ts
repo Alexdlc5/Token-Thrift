@@ -7,7 +7,7 @@ import { app } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ModelOverrides, SessionDocument } from '@shared/models'
-import type { WriteFilesRequest } from './agent-files'
+import type { WorkingDirectorySnapshot, WriteFilesRequest } from './agent-files'
 
 // Resolved lazily inside readModule(), not at module load, so this file stays importable
 // (for extractDocumentUpdate's self-check below) outside a real Electron runtime — matching
@@ -140,22 +140,51 @@ export function extractImageGenerationRequest(
 // same-named project resumes into its existing folder across turns instead of duplicating.
 const WRITE_FILES_TAG = 'write_files'
 
-function buildFileAgentInstruction(): string {
-  return [
-    'You can write real files to disk for the user — when asked to build, scaffold, or ' +
-      'create an app/script/project (not just explain or show a snippet), do not just print ' +
-      'code blocks for the user to copy by hand. Write the actual files using this exact ' +
-      'format, with nothing else inside the tags:',
+/** `snapshot` is the working directory's current contents (see agent-files.ts) — folded into
+ * the instruction so the model can write INTO an existing project accurately (real paths, real
+ * existing code to extend) instead of only ever scaffolding blind from nothing. */
+function buildFileAgentInstruction(snapshot: WorkingDirectorySnapshot | null): string {
+  const parts = [
+    'You can write real files to disk for the user — when asked to build, scaffold, ' +
+      'create, or modify an app/script/project (not just explain or show a snippet), do not ' +
+      'just print code blocks for the user to copy by hand. Write the actual files using ' +
+      'this exact format, with nothing else inside the tags:',
     `<${WRITE_FILES_TAG}>\n### PROJECT: <short-project-name>\n### FILE: <relative/path/one.ext>\n<full file contents>\n### FILE: <relative/path/two.ext>\n<full file contents>\n</${WRITE_FILES_TAG}>`,
     'Rules: give every file its FULL contents, never a diff or a "// ... rest unchanged" ' +
-      'placeholder — each ### FILE section completely replaces that file. Use relative paths ' +
+      'placeholder — each ### FILE section completely replaces that file, even one that ' +
+      'already exists (see below) and you are only changing part of. Use relative paths ' +
       'only (e.g. "src/main.js" — never "/etc/...", "C:\\...", or anything starting with ' +
       '"../"). Keep the project name short and exactly the same across a conversation about ' +
       'the same project, so a later request ("now add X") lands in the same project instead ' +
       'of creating a duplicate. Only use this when real files are actually being created or ' +
       "changed — for questions, explanations, or a single snippet that isn't meant to be run " +
       'as-is, just answer normally without it.'
-  ].join('\n\n')
+  ]
+
+  if (snapshot && snapshot.paths.length > 0) {
+    const fileList = snapshot.paths.map((p) => `- ${p}`).join('\n')
+    const excerptText = snapshot.excerpts
+      .map((e) => `### ${e.path}\n${e.content}`)
+      .join('\n\n')
+    parts.push(
+      [
+        'Your working directory already has files in it — this is an existing project, not a ' +
+          'blank slate. Its full file listing:',
+        fileList,
+        excerptText
+          ? 'Current contents of the smaller text files in it (larger or binary files are ' +
+              'listed above but not shown):\n\n' + excerptText
+          : null,
+        'When the user asks you to change something that already exists, reuse its real path ' +
+          'from the listing above and the same PROJECT name this project was created under — ' +
+          "don't guess a new path or start a parallel copy."
+      ]
+        .filter((section): section is string => Boolean(section))
+        .join('\n\n')
+    )
+  }
+
+  return parts.join('\n\n')
 }
 
 /** Splits a `<write_files>` block's inner text on its `### PROJECT:`/`### FILE:` markers.
@@ -224,10 +253,13 @@ interface DocumentContext {
 }
 
 /** Combines the user's custom system prompt, any active efficiency modules, and the
- * document-editing/image-generation instructions (when each is on), in that order. */
+ * document-editing/image-generation/agent-file instructions (when each is on), in that order.
+ * `workingDirSnapshot` is only meaningful (and only computed by the caller) when
+ * agentFileAccess is on — see agent-files.ts's snapshotWorkingDirectory. */
 export function buildSystemPrompt(
   overrides: ModelOverrides | null | undefined,
-  documentContext?: DocumentContext
+  documentContext?: DocumentContext,
+  workingDirSnapshot?: WorkingDirectorySnapshot | null
 ): string | null {
   const parts: string[] = []
   if (overrides?.systemPrompt?.trim()) parts.push(overrides.systemPrompt.trim())
@@ -236,7 +268,7 @@ export function buildSystemPrompt(
   if (documentContext?.modeEnabled) parts.push(buildDocumentInstruction(documentContext.document))
   if (documentContext?.document?.kind === 'file') parts.push(buildReferenceFileInstruction(documentContext.document))
   if (overrides?.imageGeneration) parts.push(buildImageGenerationInstruction())
-  if (overrides?.agentFileAccess) parts.push(buildFileAgentInstruction())
+  if (overrides?.agentFileAccess) parts.push(buildFileAgentInstruction(workingDirSnapshot ?? null))
   return parts.length > 0 ? parts.join('\n\n') : null
 }
 
@@ -340,6 +372,26 @@ if (require.main === module) {
   assert.strictEqual(
     extractWriteFilesRequest('<write_files>\n### FILE: a.txt\ncontent\n</write_files>'),
     null
+  )
+
+  // buildSystemPrompt with agentFileAccess doesn't touch readModule() (leanCoding/
+  // fastReasoning both off here), so this is safe to exercise without a real Electron app.
+  const noSnapshotPrompt = buildSystemPrompt({ agentFileAccess: true }, undefined, null)
+  assert.ok(noSnapshotPrompt?.includes('<write_files>'), 'agent file instruction is included when the override is on')
+  assert.ok(!noSnapshotPrompt?.includes('working directory already has files'), 'no existing-project section with no snapshot')
+
+  const withSnapshotPrompt = buildSystemPrompt({ agentFileAccess: true }, undefined, {
+    paths: ['index.js', 'assets/logo.png'],
+    excerpts: [{ path: 'index.js', content: "console.log('hi')" }]
+  })
+  assert.ok(withSnapshotPrompt?.includes('- index.js'), 'full file listing is included')
+  assert.ok(withSnapshotPrompt?.includes('- assets/logo.png'), 'files without an excerpt are still listed')
+  assert.ok(withSnapshotPrompt?.includes("console.log('hi')"), 'small text file content is included verbatim')
+
+  const emptySnapshotPrompt = buildSystemPrompt({ agentFileAccess: true }, undefined, { paths: [], excerpts: [] })
+  assert.ok(
+    !emptySnapshotPrompt?.includes('working directory already has files'),
+    'an empty working directory is treated the same as no snapshot at all'
   )
 
   console.log('prompt-modules self-check passed')
