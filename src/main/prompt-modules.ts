@@ -59,12 +59,10 @@ function buildDocumentInstruction(doc: SessionDocument | null): string {
   const title = doc?.fileName?.trim() || 'Untitled document'
   const current = doc?.kind === 'text' ? doc.content : ''
   return [
-    `You are collaboratively editing a document with the user, currently titled "${title}".`,
-    current
-      ? `Its current full content is:\n\n---\n${current}\n---`
-      : 'It is currently empty — you are starting it from scratch.',
-    `When your response should update the document, output the ENTIRE new version of it wrapped exactly like this, with nothing else inside the tags:\n<${DOCUMENT_TAG}>\n...full updated content...\n</${DOCUMENT_TAG}>`,
-    'Only include that block when you are actually revising the document. For questions, explanations, or anything that is not a document edit, respond normally without it.'
+    `Editing a document titled "${title}" with the user.`,
+    current ? `Current content:\n\n---\n${current}\n---` : 'Currently empty.',
+    `To update it, output its ENTIRE new content wrapped in <${DOCUMENT_TAG}>...</${DOCUMENT_TAG}> — nothing else inside the tags.`,
+    'Only include this block when actually revising the document; otherwise respond normally.'
   ].join('\n\n')
 }
 
@@ -79,15 +77,12 @@ function buildReferenceFileInstruction(doc: SessionDocument): string {
   const name = doc.fileName?.trim() || 'a file'
   const kind = doc.mimeType?.startsWith('image/') ? 'image' : doc.mimeType === 'application/pdf' ? 'PDF' : 'file'
   return [
-    `The user has loaded a reference ${kind} into the document panel above, named "${name}".`,
-    'An earlier system message in this conversation already read it in detail — layout by ' +
-      'region, colors, exact counts of people/animals/objects, any text found — and that ' +
-      `description is your only source of truth for it. When asked about the ${kind} ` +
-      '(what\'s in a corner, what color something is, how many of something there are, etc.), ' +
-      "answer directly and confidently from that description, the way you would if you'd " +
-      'looked at it yourself — do not hedge with phrases like "based on the description" or ' +
-      '"I was told", and do not say you are unable to see images. Only fall back to saying ' +
-      "you can't see it if that earlier message itself says the read failed."
+    `A reference ${kind} named "${name}" is loaded above.`,
+    'An earlier system message already described it in detail (layout, colors, counts, any ' +
+      "text) — that's your only source of truth. Answer questions about it directly and " +
+      'confidently, as if you\'d seen it yourself — no hedging ("based on the description"), ' +
+      "no claiming you can't view images. Only say you can't see it if that earlier message " +
+      'says the read failed.'
   ].join('\n\n')
 }
 
@@ -106,17 +101,12 @@ const IMAGE_TAG = 'generate_image'
 
 function buildImageGenerationInstruction(): string {
   return [
-    'You cannot generate images directly, but this app can — when the user asks you to ' +
-      'CREATE, DRAW, or GENERATE a new image, do not say you are unable to. Instead, write ' +
-      'a single detailed, vivid image-generation prompt describing exactly what to create, ' +
-      'wrapped like this:',
+    "This app can generate images for you — when asked to CREATE/DRAW/GENERATE a new image, " +
+      "don't say you can't. Write a vivid image prompt wrapped like this:",
     `<${IMAGE_TAG}>a detailed description of the image to generate</${IMAGE_TAG}>`,
-    'Only use this when a brand-new image is actually being requested — never for unrelated ' +
-      'replies, and never when the user is instead asking you to describe, analyze, read, or ' +
-      'answer a question about an image or file they already loaded into the document panel. ' +
-      'For that, answer from whatever description of it you were already given above — if ' +
-      'none was given or it says the read failed, say plainly that you cannot see the file, ' +
-      'rather than generating an unrelated image as a substitute.'
+    'Only for genuinely new images — never when the user is asking about a file already ' +
+      'loaded above (answer from its description instead, or say the read failed; ' +
+      "don't generate a substitute)."
   ].join('\n\n')
 }
 
@@ -145,20 +135,15 @@ const WRITE_FILES_TAG = 'write_files'
  * existing code to extend) instead of only ever scaffolding blind from nothing. */
 function buildFileAgentInstruction(snapshot: WorkingDirectorySnapshot | null): string {
   const parts = [
-    'You can write real files to disk for the user — when asked to build, scaffold, ' +
-      'create, or modify an app/script/project (not just explain or show a snippet), do not ' +
-      'just print code blocks for the user to copy by hand. Write the actual files using ' +
-      'this exact format, with nothing else inside the tags:',
+    "You can write real files to disk — when asked to build/scaffold/modify an app/script/" +
+      "project, don't just print code blocks to copy by hand; write the actual files in " +
+      'this format:',
     `<${WRITE_FILES_TAG}>\n### PROJECT: <short-project-name>\n### FILE: <relative/path/one.ext>\n<full file contents>\n### FILE: <relative/path/two.ext>\n<full file contents>\n</${WRITE_FILES_TAG}>`,
-    'Rules: give every file its FULL contents, never a diff or a "// ... rest unchanged" ' +
-      'placeholder — each ### FILE section completely replaces that file, even one that ' +
-      'already exists (see below) and you are only changing part of. Use relative paths ' +
-      'only (e.g. "src/main.js" — never "/etc/...", "C:\\...", or anything starting with ' +
-      '"../"). Keep the project name short and exactly the same across a conversation about ' +
-      'the same project, so a later request ("now add X") lands in the same project instead ' +
-      'of creating a duplicate. Only use this when real files are actually being created or ' +
-      "changed — for questions, explanations, or a single snippet that isn't meant to be run " +
-      'as-is, just answer normally without it.'
+    'Rules: FULL file contents only, never a diff or "...rest unchanged" — each FILE section ' +
+      'fully replaces that file. Relative paths only (never absolute or "../"). Keep the ' +
+      'PROJECT name identical across a conversation about the same project so later edits ' +
+      'land in the same place. Only for actual file creation/changes — not for a single ' +
+      'snippet or explanation.'
   ]
 
   if (snapshot && snapshot.paths.length > 0) {
@@ -168,16 +153,10 @@ function buildFileAgentInstruction(snapshot: WorkingDirectorySnapshot | null): s
       .join('\n\n')
     parts.push(
       [
-        'Your working directory already has files in it — this is an existing project, not a ' +
-          'blank slate. Its full file listing:',
+        'Working directory contents (existing project, not blank):',
         fileList,
-        excerptText
-          ? 'Current contents of the smaller text files in it (larger or binary files are ' +
-              'listed above but not shown):\n\n' + excerptText
-          : null,
-        'When the user asks you to change something that already exists, reuse its real path ' +
-          'from the listing above and the same PROJECT name this project was created under — ' +
-          "don't guess a new path or start a parallel copy."
+        excerptText ? "Smaller text files' current contents (others listed above, not shown):\n\n" + excerptText : null,
+        "Reuse existing paths/PROJECT name when editing — don't guess new ones."
       ]
         .filter((section): section is string => Boolean(section))
         .join('\n\n')
@@ -378,7 +357,7 @@ if (require.main === module) {
   // fastReasoning both off here), so this is safe to exercise without a real Electron app.
   const noSnapshotPrompt = buildSystemPrompt({ agentFileAccess: true }, undefined, null)
   assert.ok(noSnapshotPrompt?.includes('<write_files>'), 'agent file instruction is included when the override is on')
-  assert.ok(!noSnapshotPrompt?.includes('working directory already has files'), 'no existing-project section with no snapshot')
+  assert.ok(!noSnapshotPrompt?.includes('Working directory contents'), 'no existing-project section with no snapshot')
 
   const withSnapshotPrompt = buildSystemPrompt({ agentFileAccess: true }, undefined, {
     paths: ['index.js', 'assets/logo.png'],
@@ -390,7 +369,7 @@ if (require.main === module) {
 
   const emptySnapshotPrompt = buildSystemPrompt({ agentFileAccess: true }, undefined, { paths: [], excerpts: [] })
   assert.ok(
-    !emptySnapshotPrompt?.includes('working directory already has files'),
+    !emptySnapshotPrompt?.includes('Working directory contents'),
     'an empty working directory is treated the same as no snapshot at all'
   )
 

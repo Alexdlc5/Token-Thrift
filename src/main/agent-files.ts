@@ -142,8 +142,12 @@ const SNAPSHOT_TEXT_EXTENSIONS = new Set([
   '.js', '.jsx', '.ts', '.tsx', '.json', '.md', '.txt', '.html', '.css', '.py', '.java',
   '.c', '.cpp', '.h', '.go', '.rs', '.rb', '.php', '.yml', '.yaml', '.toml', '.sh', '.bat'
 ])
-const SNAPSHOT_MAX_FILE_CHARS = 4000
-const SNAPSHOT_MAX_TOTAL_CHARS = 8000
+// Halved from the original 4000/8000: this gets resent in full on every single message while
+// agentFileAccess is on, even a message that has nothing to do with the working directory —
+// worth staying conservative here specifically since, unlike a one-off read, this is a
+// recurring per-message cost for as long as the toggle stays on.
+const SNAPSHOT_MAX_FILE_CHARS = 2000
+const SNAPSHOT_MAX_TOTAL_CHARS = 4000
 
 export interface WorkingDirectorySnapshot {
   /** Every file's path relative to the working directory, so the model can reference real
