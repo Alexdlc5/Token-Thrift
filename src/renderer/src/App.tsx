@@ -169,6 +169,13 @@ export default function App(): React.JSX.Element {
     window.api.setSessionArchived(id, next).catch(console.error)
   }
 
+  function handleDeleteSession(id: string): void {
+    setSessions((prev) => prev.filter((s) => s.id !== id))
+    setMessages((prev) => prev.filter((m) => m.sessionId !== id))
+    if (activeSessionId === id) setActiveSessionId(null)
+    window.api.deleteSession(id).catch(console.error)
+  }
+
   function handlePickModel(model: ModelInfo): void {
     if (pickerMode === 'switch' && activeSessionId) {
       window.api
@@ -260,6 +267,7 @@ export default function App(): React.JSX.Element {
         onSelect={handleSelectSession}
         onRename={handleRenameSession}
         onToggleArchive={handleToggleArchive}
+        onDelete={handleDeleteSession}
         onNewSession={() => setPickerMode('new')}
       />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>

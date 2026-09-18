@@ -2,6 +2,7 @@
 // native module compilation required, unlike better-sqlite3. Query/repository functions on
 // top of this schema live in separate files; this module only owns the connection + DDL.
 
+import assert from 'node:assert'
 import { DatabaseSync } from 'node:sqlite'
 import { app } from 'electron'
 import { join } from 'node:path'
@@ -47,6 +48,28 @@ CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id);
 `
 
+// CREATE TABLE IF NOT EXISTS only helps on a brand-new database — it's a no-op against an
+// existing table, so a column added here later never reaches a database that already has
+// that table (this bit a real user once: "compressed" landed in SCHEMA above, but existing
+// installs kept the old table shape and every message:send call failed). Each column added
+// after the table's initial release needs one line here; ALTER TABLE errors only on a
+// column that already exists, which this treats as "already migrated," not a failure.
+const COLUMN_MIGRATIONS: string[] = [
+  'ALTER TABLE tasks ADD COLUMN system_prompt TEXT',
+  'ALTER TABLE messages ADD COLUMN compressed INTEGER NOT NULL DEFAULT 0'
+]
+
+export function applyColumnMigrations(database: DatabaseSync): void {
+  for (const sql of COLUMN_MIGRATIONS) {
+    try {
+      database.exec(sql)
+    } catch (err) {
+      const alreadyExists = err instanceof Error && /duplicate column name/i.test(err.message)
+      if (!alreadyExists) throw err
+    }
+  }
+}
+
 let db: DatabaseSync | undefined
 
 /** Lazily-opened singleton connection, WAL mode, schema applied idempotently. */
@@ -56,5 +79,43 @@ export function getDb(): DatabaseSync {
   db = new DatabaseSync(dbPath)
   db.exec('PRAGMA journal_mode = WAL')
   db.exec(SCHEMA)
+  applyColumnMigrations(db)
   return db
+}
+
+// --- self-check ---------------------------------------------------------------------
+// Reproduces the exact real-world failure this migration exists to fix: a database whose
+// tables predate a column that later landed in SCHEMA above. No Electron needed — pure
+// DatabaseSync + the exported functions.
+if (require.main === module) {
+  const oldShapeDb = new DatabaseSync(':memory:')
+  oldShapeDb.exec(`
+    CREATE TABLE sessions (id TEXT PRIMARY KEY, provider_id TEXT, model_id TEXT, title TEXT, created_at INTEGER, archived INTEGER);
+    CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, reasoning TEXT, created_at INTEGER);
+    CREATE TABLE tasks (id TEXT PRIMARY KEY, session_id TEXT, provider_id TEXT, model_id TEXT, status TEXT, started_at INTEGER);
+  `)
+  oldShapeDb.prepare('INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)').run(
+    'm1', 's1', 'user', 'hello', 0
+  )
+
+  applyColumnMigrations(oldShapeDb)
+  const messageCols = oldShapeDb.prepare('PRAGMA table_info(messages)').all().map((c) => (c as { name: string }).name)
+  const taskCols = oldShapeDb.prepare('PRAGMA table_info(tasks)').all().map((c) => (c as { name: string }).name)
+  assert.ok(messageCols.includes('compressed'), 'compressed column added to an old-shape table')
+  assert.ok(taskCols.includes('system_prompt'), 'system_prompt column added to an old-shape table')
+  assert.strictEqual(
+    oldShapeDb.prepare('SELECT content FROM messages WHERE id = ?').get('m1')?.content,
+    'hello',
+    'existing row survives the migration'
+  )
+
+  // Idempotent: running it again against an already-migrated table must not throw.
+  applyColumnMigrations(oldShapeDb)
+
+  // A brand-new database (SCHEMA already includes both columns) must also not throw.
+  const freshDb = new DatabaseSync(':memory:')
+  freshDb.exec(SCHEMA)
+  applyColumnMigrations(freshDb)
+
+  console.log('schema self-check passed')
 }

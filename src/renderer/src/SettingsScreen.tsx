@@ -70,10 +70,18 @@ function ProviderKeysCard({
                 checked={key.id === activeKeyId}
                 onChange={() => onSetActive(key.id)}
               />
-              <span style={{ flex: 1 }}>
+              <span style={{ width: 90, flexShrink: 0 }}>
                 {key.label}
                 {key.id === activeKeyId ? ' (active)' : ''}
               </span>
+              {/* Shows as a filled box so it's visually obvious a key IS saved here — this is
+                  never the real secret, which never comes back to the renderer at all. */}
+              <input
+                type="password"
+                value="••••••••••••"
+                disabled
+                style={{ flex: 1, padding: 6, fontSize: 12, opacity: 0.7 }}
+              />
               <span style={{ opacity: 0.6 }}>{new Date(key.createdAt).toLocaleDateString()}</span>
               <button onClick={() => onRemove(key.id)} style={{ fontSize: 11 }}>
                 Remove
@@ -88,6 +96,9 @@ function ProviderKeysCard({
           Needs two values — paste as <code>accountId:apiToken</code>
         </p>
       )}
+      <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 4 }}>
+        {keys.length > 0 ? 'Add another key' : 'Add a key'}
+      </div>
       <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
         <input
           value={draftLabel}

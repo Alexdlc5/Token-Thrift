@@ -8,6 +8,7 @@ interface SidebarProps {
   onSelect: (id: string) => void
   onRename: (id: string, title: string) => void
   onToggleArchive: (id: string) => void
+  onDelete: (id: string) => void
   onNewSession: () => void
 }
 
@@ -17,6 +18,7 @@ export default function Sidebar({
   onSelect,
   onRename,
   onToggleArchive,
+  onDelete,
   onNewSession
 }: SidebarProps): React.JSX.Element {
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -99,6 +101,17 @@ export default function Sidebar({
                 style={{ fontSize: 11 }}
               >
                 {session.archived ? 'Unarchive' : 'Archive'}
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (window.confirm(`Delete "${session.title}"? This can't be undone.`)) {
+                    onDelete(session.id)
+                  }
+                }}
+                style={{ fontSize: 11 }}
+              >
+                Delete
               </button>
             </div>
           </div>

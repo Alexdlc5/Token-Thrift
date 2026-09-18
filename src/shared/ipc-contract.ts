@@ -7,7 +7,8 @@ export const IPC = {
     create: 'session:create',
     rename: 'session:rename',
     archive: 'session:archive',
-    updateModel: 'session:updateModel'
+    updateModel: 'session:updateModel',
+    delete: 'session:delete'
   },
   message: {
     list: 'message:list',

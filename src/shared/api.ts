@@ -18,6 +18,8 @@ export interface TokenThriftApi {
   setSessionArchived(id: string, archived: boolean): Promise<void>
   /** Switches an existing session to a different provider/model, keeping its message history. */
   updateSessionModel(id: string, providerId: ProviderId, modelId: string): Promise<void>
+  /** Permanently deletes a session and its messages/tasks — irreversible, unlike archiving. */
+  deleteSession(id: string): Promise<void>
 
   listMessages(sessionId: string): Promise<ChatMessage[]>
   sendMessage(

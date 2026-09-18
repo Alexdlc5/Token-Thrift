@@ -6,6 +6,7 @@ import {
   addMessage,
   createSession,
   createTask,
+  deleteSession,
   getSession,
   listMessages,
   listMessagesForModel,
@@ -170,6 +171,7 @@ function registerIpcHandlers(): void {
     updateSessionModel(id, providerId, modelId)
     addMessage(id, 'system', `[Switched to ${providerId} / ${modelId}]`)
   })
+  ipcMain.handle(IPC.session.delete, async (_e, id) => deleteSession(id))
 
   ipcMain.handle(IPC.message.list, async (_e, sessionId) => listMessages(sessionId))
   ipcMain.handle(

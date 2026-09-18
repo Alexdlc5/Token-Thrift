@@ -11,6 +11,7 @@ import {
   addMessage,
   createSession,
   createTask,
+  deleteSession,
   getTask,
   listMessages,
   listMessagesForModel,
@@ -137,6 +138,13 @@ updateSessionModel(session.id, 'openrouter', 'openrouter/free')
 const switched = listSessions().find((s) => s.id === session.id)
 assert.strictEqual(switched?.providerId, 'openrouter')
 assert.strictEqual(switched?.modelId, 'openrouter/free')
+
+// --- delete ---
+
+deleteSession(session.id)
+assert.strictEqual(listSessions().find((s) => s.id === session.id), undefined, 'session gone')
+assert.strictEqual(listMessages(session.id).length, 0, 'messages gone')
+assert.strictEqual(listTasks().filter((t) => t.sessionId === session.id).length, 0, 'tasks gone')
 
 _setDbForTesting(undefined)
 memoryDb.close()

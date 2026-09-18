@@ -146,6 +146,21 @@ export function updateSessionModel(id: string, providerId: ProviderId, modelId: 
   conn().prepare(`UPDATE sessions SET provider_id = ?, model_id = ? WHERE id = ?`).run(providerId, modelId, id)
 }
 
+/** Permanently removes a session and everything under it — irreversible, unlike archiving. */
+export function deleteSession(id: string): void {
+  const db = conn()
+  db.exec('BEGIN')
+  try {
+    db.prepare(`DELETE FROM messages WHERE session_id = ?`).run(id)
+    db.prepare(`DELETE FROM tasks WHERE session_id = ?`).run(id)
+    db.prepare(`DELETE FROM sessions WHERE id = ?`).run(id)
+    db.exec('COMMIT')
+  } catch (err) {
+    db.exec('ROLLBACK')
+    throw err
+  }
+}
+
 // ---- messages ----
 
 export function listMessages(sessionId: string): ChatMessage[] {
