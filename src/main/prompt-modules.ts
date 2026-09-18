@@ -67,6 +67,25 @@ function buildDocumentInstruction(doc: SessionDocument | null): string {
   ].join('\n\n')
 }
 
+// A loaded image/PDF is never editable (DocumentPanel forces document-edit mode off the
+// moment a binary file is loaded), so it never went through buildDocumentInstruction above —
+// the model got no mention of it at all, and free models tend to fall back to a flat "I'm a
+// text-based AI, I can't see images" denial instead of using whatever description they were
+// actually given elsewhere in the conversation (the [Image loaded: ...] system message from
+// handleFileSideEffects in main/index.ts). This runs whenever a file is loaded, independent
+// of edit mode, so that denial has no reason to happen.
+function buildReferenceFileInstruction(doc: SessionDocument): string {
+  const name = doc.fileName?.trim() || 'a file'
+  const kind = doc.mimeType?.startsWith('image/') ? 'image' : doc.mimeType === 'application/pdf' ? 'PDF' : 'file'
+  return [
+    `The user has loaded a reference ${kind} into the document panel above, named "${name}".`,
+    'You cannot see it directly, but if it was read successfully, an earlier system message ' +
+      "in this conversation summarizes its contents — use that to answer the user's questions " +
+      "about it. If that message says the read failed, say plainly that you can't see the " +
+      'file, rather than claiming you have no ability to view uploaded files at all.'
+  ].join('\n\n')
+}
+
 /** Pulls the last `<document>...</document>` block out of a response, if present. */
 export function extractDocumentUpdate(
   responseText: string
@@ -151,6 +170,7 @@ export function buildSystemPrompt(
   if (overrides?.leanCoding) parts.push(readModule('lean-coding.md'))
   if (overrides?.fastReasoning) parts.push(readModule('fast-reasoning.md'))
   if (documentContext?.modeEnabled) parts.push(buildDocumentInstruction(documentContext.document))
+  if (documentContext?.document?.kind === 'file') parts.push(buildReferenceFileInstruction(documentContext.document))
   if (overrides?.imageGeneration) parts.push(buildImageGenerationInstruction())
   return parts.length > 0 ? parts.join('\n\n') : null
 }

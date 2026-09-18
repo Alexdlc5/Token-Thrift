@@ -422,7 +422,9 @@ function registerIpcHandlers(): void {
       addMessage(sessionId, 'user', content)
 
       const modeEnabled = isDocumentModeEnabled(sessionId)
-      const document = modeEnabled ? getSessionDocument(sessionId) : null
+      // Not gated by modeEnabled — a loaded image/PDF always has editing off (it's binary),
+      // but the model still needs to know it exists so it doesn't deny having one at all.
+      const document = getSessionDocument(sessionId)
 
       const task = createTask({
         parentTaskId: null,
