@@ -51,6 +51,7 @@ const api: TokenThriftApi = {
   saveAsDefaultOverrides: (overrides) => ipcRenderer.invoke(IPC.overrides.setDefault, overrides),
 
   pickFolder: () => ipcRenderer.invoke(IPC.system.pickFolder),
+  checkWorkingDirSize: (path) => ipcRenderer.invoke(IPC.system.checkWorkingDir, path),
 
   listTasks: () => ipcRenderer.invoke(IPC.task.list),
 

@@ -36,7 +36,8 @@ export const IPC = {
     list: 'task:list'
   },
   system: {
-    pickFolder: 'system:pickFolder'
+    pickFolder: 'system:pickFolder',
+    checkWorkingDir: 'system:checkWorkingDir'
   },
   document: {
     get: 'document:get',

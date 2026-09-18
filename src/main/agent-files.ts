@@ -13,6 +13,7 @@
 import assert from 'node:assert'
 import { app } from 'electron'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import type { Dirent } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, extname, join, relative, resolve, sep } from 'node:path'
 import { sanitizeFileName } from './library'
@@ -151,8 +152,24 @@ export interface WorkingDirectorySnapshot {
   excerpts: { path: string; content: string }[]
 }
 
+// Hard stop for the walk itself, independent of the (lower) warn threshold below — a
+// pathological pick (a whole drive, the user's home directory) must not hang the main
+// process on a synchronous multi-million-entry walk; past this point "too many" is already
+// established regardless of the exact count.
+const WALK_HARD_CAP = 2000
+
+function safeReadDir(dir: string): Dirent[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return [] // permission-denied or similar on an arbitrary user-picked path — skip, don't crash
+  }
+}
+
 function walkForSnapshot(dir: string, root: string, paths: string[]): void {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+  if (paths.length >= WALK_HARD_CAP) return
+  for (const entry of safeReadDir(dir)) {
+    if (paths.length >= WALK_HARD_CAP) return
     if (entry.isDirectory()) {
       if (SNAPSHOT_SKIP_DIRS.has(entry.name)) continue
       walkForSnapshot(join(dir, entry.name), root, paths)
@@ -180,6 +197,27 @@ export function snapshotWorkingDirectory(root: string): WorkingDirectorySnapshot
     budget -= content.length
   }
   return { paths, excerpts }
+}
+
+// A folder with far more files than this gets its ENTIRE listing dumped into the system
+// prompt on every single turn (snapshotWorkingDirectory doesn't cap the listing itself, only
+// the excerpt content) — worth warning about before the user picks it, not after they notice
+// every message got slow/expensive.
+export const WORKING_DIR_WARN_FILE_COUNT = 150
+
+export interface WorkingDirSizeCheck {
+  fileCount: number
+  tooMany: boolean
+}
+
+/** Cheap pre-check for the folder picker in Settings — same walk/skip-list as the real
+ * snapshot, so "too many files" means exactly what it will actually cost on every message
+ * afterward. null when the path doesn't exist yet (a brand-new folder — nothing to warn
+ * about). */
+export function checkWorkingDirSize(root: string): WorkingDirSizeCheck | null {
+  const snapshot = snapshotWorkingDirectory(root)
+  if (!snapshot) return null
+  return { fileCount: snapshot.paths.length, tooMany: snapshot.paths.length > WORKING_DIR_WARN_FILE_COUNT }
 }
 
 // --- self-check ---------------------------------------------------------------------
@@ -279,6 +317,24 @@ if (require.main === module) {
   const bigSnapshot = snapshotWorkingDirectory(bigDir)
   assert.deepStrictEqual(bigSnapshot?.paths.sort(), ['binary.png', 'huge.js'], 'still listed even when skipped')
   assert.deepStrictEqual(bigSnapshot?.excerpts, [], 'oversized file and non-text extension both excluded from content')
+
+  // --- checkWorkingDirSize / WORKING_DIR_WARN_FILE_COUNT ---
+
+  assert.strictEqual(checkWorkingDirSize(join(testRoot, 'does-not-exist')), null)
+
+  const smallDir = join(testRoot, 'small-dir')
+  mkdirSync(smallDir, { recursive: true })
+  writeFileSync(join(smallDir, 'a.txt'), 'x', 'utf8')
+  assert.deepStrictEqual(checkWorkingDirSize(smallDir), { fileCount: 1, tooMany: false })
+
+  const bigCountDir = join(testRoot, 'many-files')
+  mkdirSync(bigCountDir, { recursive: true })
+  for (let i = 0; i < WORKING_DIR_WARN_FILE_COUNT + 1; i++) {
+    writeFileSync(join(bigCountDir, `f${i}.txt`), '', 'utf8')
+  }
+  const bigCountCheck = checkWorkingDirSize(bigCountDir)
+  assert.strictEqual(bigCountCheck?.fileCount, WORKING_DIR_WARN_FILE_COUNT + 1)
+  assert.strictEqual(bigCountCheck?.tooMany, true, 'crosses the warn threshold')
 
   rmSync(testRoot, { recursive: true, force: true })
   console.log('agent-files self-check passed')

@@ -40,7 +40,13 @@ import { fitHistoryToBudget } from './context-window'
 import { maybeCompressSession } from './context-compression'
 import { cloudflareImageProvider } from './image-providers/cloudflare-image'
 import { readImage } from './image-providers/cloudflare-vision'
-import { folderSizeBytes, projectsRoot, snapshotWorkingDirectory, writeProjectFiles } from './agent-files'
+import {
+  checkWorkingDirSize,
+  folderSizeBytes,
+  projectsRoot,
+  snapshotWorkingDirectory,
+  writeProjectFiles
+} from './agent-files'
 import { saveToLibrary, getLibraryItemPath, deleteLibraryDir } from './library'
 import { listLibraryItems, reorderLibraryItems } from './db/repository'
 import {
@@ -551,6 +557,7 @@ function registerIpcHandlers(): void {
       : await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
     return result.canceled ? null : (result.filePaths[0] ?? null)
   })
+  ipcMain.handle(IPC.system.checkWorkingDir, async (_e, path: string) => checkWorkingDirSize(path))
 
   ipcMain.handle(IPC.task.list, async () => listTasks())
 

@@ -58,6 +58,8 @@ export interface TokenThriftApi {
 
   /** Native OS folder-picker dialog — null if the user cancelled it. */
   pickFolder(): Promise<string | null>
+  /** null if the path doesn't exist yet (a brand-new folder — nothing to warn about). */
+  checkWorkingDirSize(path: string): Promise<{ fileCount: number; tooMany: boolean } | null>
 
   listTasks(): Promise<TaskRow[]>
 

@@ -1,14 +1,75 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ModelOverrides, ProviderId, SessionSummary, StoredKeyInfo } from '@shared/models'
 import { ALL_PROVIDERS, PROVIDER_LABELS } from './mockData'
 
-function handlePickWorkingDir(onUpdateOverrides: (patch: Partial<ModelOverrides>) => void): void {
-  window.api
-    .pickFolder()
-    .then((path) => {
-      if (path) onUpdateOverrides({ agentWorkingDir: path })
-    })
-    .catch(console.error)
+const WORKING_DIR_CHECK_DEBOUNCE_MS = 400
+
+/** The path field + Browse button + "this folder's too big" warning — split out since it
+ * needs its own debounced size-check state, separate from the rest of the overrides form. */
+function WorkingDirField({
+  overrides,
+  onUpdateOverrides
+}: {
+  overrides: ModelOverrides
+  onUpdateOverrides: (patch: Partial<ModelOverrides>) => void
+}): React.JSX.Element {
+  const [warning, setWarning] = useState<string | null>(null)
+  const checkTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  // Re-checks whenever the path changes for any reason — typing, a Browse pick, or switching
+  // to a session with a different saved working directory — debounced so free typing doesn't
+  // fire an IPC call (a real directory walk) per keystroke.
+  useEffect(() => {
+    clearTimeout(checkTimer.current)
+    const path = overrides.agentWorkingDir?.trim()
+    if (!path) {
+      setWarning(null)
+      return
+    }
+    checkTimer.current = setTimeout(() => {
+      window.api
+        .checkWorkingDirSize(path)
+        .then((result) => {
+          setWarning(
+            result?.tooMany
+              ? `This folder has ${result.fileCount} files in it — the agent reads through all of them every message. Pick a smaller, more focused folder for it to work in.`
+              : null
+          )
+        })
+        .catch(console.error)
+    }, WORKING_DIR_CHECK_DEBOUNCE_MS)
+    return () => clearTimeout(checkTimer.current)
+  }, [overrides.agentWorkingDir])
+
+  function handleBrowse(): void {
+    window.api
+      .pickFolder()
+      .then((path) => {
+        if (path) onUpdateOverrides({ agentWorkingDir: path })
+      })
+      .catch(console.error)
+  }
+
+  return (
+    <div style={{ marginTop: 8, marginLeft: 22 }}>
+      <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 4 }}>
+        Working directory — the model reads and writes only inside this folder. Leave blank to
+        use a "Token Thrift Projects" folder under Documents, with one subfolder per project.
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input
+          value={overrides.agentWorkingDir ?? ''}
+          onChange={(e) => onUpdateOverrides({ agentWorkingDir: e.target.value })}
+          placeholder="Default: Documents/Token Thrift Projects"
+          style={{ flex: 1, padding: 6, fontSize: 12 }}
+        />
+        <button onClick={handleBrowse} style={{ fontSize: 12 }}>
+          Browse…
+        </button>
+      </div>
+      {warning && <div style={{ fontSize: 11, color: '#e0a03f', marginTop: 4 }}>⚠ {warning}</div>}
+    </div>
+  )
 }
 
 interface SettingsScreenProps {
@@ -265,24 +326,7 @@ export default function SettingsScreen({
             Agent file access — let the model write (and read) real project files
           </label>
           {overrides.agentFileAccess && (
-            <div style={{ marginTop: 8, marginLeft: 22 }}>
-              <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 4 }}>
-                Working directory — the model reads and writes only inside this folder. Leave
-                blank to use a "Token Thrift Projects" folder under Documents, with one
-                subfolder per project.
-              </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input
-                  value={overrides.agentWorkingDir ?? ''}
-                  onChange={(e) => onUpdateOverrides({ agentWorkingDir: e.target.value })}
-                  placeholder="Default: Documents/Token Thrift Projects"
-                  style={{ flex: 1, padding: 6, fontSize: 12 }}
-                />
-                <button onClick={() => handlePickWorkingDir(onUpdateOverrides)} style={{ fontSize: 12 }}>
-                  Browse…
-                </button>
-              </div>
-            </div>
+            <WorkingDirField overrides={overrides} onUpdateOverrides={onUpdateOverrides} />
           )}
 
           <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid #333' }}>
