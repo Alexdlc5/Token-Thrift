@@ -75,6 +75,9 @@ export interface TokenThriftApi {
   openLibraryItem(id: string): Promise<void>
   /** Persists a manual drag-and-drop order for a session's library grid. */
   reorderLibraryItems(sessionId: string, orderedIds: string[]): Promise<void>
+  /** Re-points a 'link' item at a new real path — how a user recovers a link whose target
+   * moved or was deleted, by dragging a replacement file/folder onto it. */
+  relinkLibraryItem(id: string, newPath: string): Promise<LibraryItem>
 
   onTaskUpdate(cb: (task: TaskRow) => void): () => void
   onChatChunk(cb: (evt: ChatStreamChunk) => void): () => void

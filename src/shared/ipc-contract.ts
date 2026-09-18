@@ -43,7 +43,8 @@ export const IPC = {
   library: {
     list: 'library:list',
     open: 'library:open',
-    reorder: 'library:reorder'
+    reorder: 'library:reorder',
+    relink: 'library:relink'
   },
   events: {
     taskUpdate: 'event:taskUpdate',

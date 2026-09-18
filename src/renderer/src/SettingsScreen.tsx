@@ -237,13 +237,21 @@ export default function SettingsScreen({
             />
             Fast reasoning mode
           </label>
-          <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
             <input
               type="checkbox"
               checked={overrides.imageGeneration ?? false}
               onChange={(e) => onUpdateOverrides({ imageGeneration: e.target.checked })}
             />
             Image generation (via Cloudflare Workers AI — needs a key above)
+          </label>
+          <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={overrides.agentFileAccess ?? false}
+              onChange={(e) => onUpdateOverrides({ agentFileAccess: e.target.checked })}
+            />
+            Agent file access — let the model write real projects to your Documents folder
           </label>
         </div>
       )}

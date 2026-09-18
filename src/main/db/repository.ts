@@ -367,12 +367,14 @@ interface LibraryItemRow {
   description: string | null
   created_at: number
   sort_order: number
+  item_kind: string
 }
 
 function mapLibraryItem(row: LibraryItemRow): LibraryItem {
   return {
     id: row.id,
     sessionId: row.session_id,
+    kind: row.item_kind === 'link' ? 'link' : 'file',
     fileName: row.file_name,
     mimeType: row.mime_type,
     sizeBytes: row.size_bytes,
@@ -388,18 +390,33 @@ export function addLibraryItem(input: {
   mimeType: string
   sizeBytes: number
   description: string | null
+  /** 'file' (default): bytes already copied into userData/library/. 'link': filePath points
+   * somewhere else on disk entirely — see the LibraryItem doc comment in @shared/models. */
+  kind?: 'file' | 'link'
 }): LibraryItem {
   const id = randomUUID()
   const createdAt = Date.now()
+  const kind = input.kind ?? 'file'
   conn()
     .prepare(
-      `INSERT INTO library_items (id, session_id, file_name, file_path, mime_type, size_bytes, description, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO library_items (id, session_id, file_name, file_path, mime_type, size_bytes, description, created_at, item_kind)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(id, input.sessionId, input.fileName, input.filePath, input.mimeType, input.sizeBytes, input.description, createdAt)
+    .run(
+      id,
+      input.sessionId,
+      input.fileName,
+      input.filePath,
+      input.mimeType,
+      input.sizeBytes,
+      input.description,
+      createdAt,
+      kind
+    )
   return {
     id,
     sessionId: input.sessionId,
+    kind,
     fileName: input.fileName,
     mimeType: input.mimeType,
     sizeBytes: input.sizeBytes,
@@ -421,6 +438,26 @@ export function listLibraryItems(sessionId: string): LibraryItem[] {
 export function reorderLibraryItems(orderedIds: string[]): void {
   const stmt = conn().prepare(`UPDATE library_items SET sort_order = ? WHERE id = ?`)
   orderedIds.forEach((id, index) => stmt.run(index, id))
+}
+
+/** Finds an existing link item by session + exact name — so a follow-up "now add sound to the
+ * pong game" writes into the same project folder instead of creating a second one. */
+export function findLibraryLinkByName(sessionId: string, fileName: string): LibraryItem | undefined {
+  const row = conn()
+    .prepare(`SELECT * FROM library_items WHERE session_id = ? AND item_kind = 'link' AND file_name = ?`)
+    .get(sessionId, fileName) as unknown as LibraryItemRow | undefined
+  return row ? mapLibraryItem(row) : undefined
+}
+
+/** Re-points a link item at a new path (drag-and-drop recovery when the old one goes missing),
+ * refreshing its size to match. */
+export function relinkLibraryItem(id: string, filePath: string, sizeBytes: number): LibraryItem {
+  conn().prepare(`UPDATE library_items SET file_path = ?, size_bytes = ? WHERE id = ?`).run(filePath, sizeBytes, id)
+  const row = conn().prepare(`SELECT * FROM library_items WHERE id = ?`).get(id) as unknown as
+    | LibraryItemRow
+    | undefined
+  if (!row) throw new Error(`No library item with id "${id}"`)
+  return mapLibraryItem(row)
 }
 
 /** Internal-only (file_path never leaves main) — used to resolve what to hand shell.openPath(). */

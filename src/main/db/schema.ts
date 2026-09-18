@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS library_items (
   size_bytes INTEGER NOT NULL,
   description TEXT,
   created_at INTEGER NOT NULL,
-  sort_order INTEGER NOT NULL DEFAULT 0
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  item_kind TEXT NOT NULL DEFAULT 'file'
 );
 CREATE INDEX IF NOT EXISTS idx_library_session ON library_items(session_id);
 `
@@ -82,7 +83,8 @@ const COLUMN_MIGRATIONS: string[] = [
   'ALTER TABLE sessions ADD COLUMN document_file_name TEXT',
   'ALTER TABLE sessions ADD COLUMN document_updated_at INTEGER',
   'ALTER TABLE sessions ADD COLUMN document_mode INTEGER NOT NULL DEFAULT 0',
-  'ALTER TABLE library_items ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0'
+  'ALTER TABLE library_items ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0',
+  "ALTER TABLE library_items ADD COLUMN item_kind TEXT NOT NULL DEFAULT 'file'"
 ]
 
 export function applyColumnMigrations(database: DatabaseSync): void {
@@ -135,6 +137,7 @@ if (require.main === module) {
   assert.ok(sessionCols.includes('document_content'), 'document columns added to an old-shape sessions table')
   assert.ok(sessionCols.includes('document_mode'), 'document_mode column added to an old-shape sessions table')
   assert.ok(libraryCols.includes('sort_order'), 'sort_order column added to an old-shape library_items table')
+  assert.ok(libraryCols.includes('item_kind'), 'item_kind column added to an old-shape library_items table')
   assert.strictEqual(
     oldShapeDb.prepare('SELECT content FROM messages WHERE id = ?').get('m1')?.content,
     'hello',

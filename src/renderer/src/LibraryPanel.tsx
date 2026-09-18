@@ -78,9 +78,28 @@ export default function LibraryPanel({ sessionId }: LibraryPanelProps): React.JS
     window.api.openLibraryItem(id).catch((err: unknown) => alert(err instanceof Error ? err.message : String(err)))
   }
 
-  // Reorders optimistically (instant visual feedback) and persists in the background — a
-  // failed save just means the order resets to the DB's on next load, no need to block on it.
-  function handleDrop(targetIndex: number): void {
+  function handleRelink(item: LibraryItem, newPath: string): void {
+    window.api
+      .relinkLibraryItem(item.id, newPath)
+      .then((updated) => setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i))))
+      .catch((err: unknown) => alert(err instanceof Error ? err.message : String(err)))
+  }
+
+  // Two different things can be dropped on a tile: another library tile (reordering — no real
+  // OS files involved, dataTransfer.files is empty) or a real file/folder dragged in from the
+  // OS (dataTransfer.files is populated). The latter only does something on a missing link —
+  // it relinks it to wherever the user just dropped instead of reordering anything.
+  function handleDrop(e: React.DragEvent<HTMLButtonElement>, targetIndex: number, targetItem: LibraryItem): void {
+    e.preventDefault()
+    if (e.dataTransfer.files.length > 0) {
+      if (targetItem.kind === 'link' && targetItem.missing) {
+        const droppedPath = (e.dataTransfer.files[0] as unknown as { path?: string }).path
+        if (droppedPath) handleRelink(targetItem, droppedPath)
+      }
+      return
+    }
+    // Reorders optimistically (instant visual feedback) and persists in the background — a
+    // failed save just means the order resets to the DB's on next load, no need to block on it.
     if (dragIndex === null || dragIndex === targetIndex) return
     const next = [...items]
     const [moved] = next.splice(dragIndex, 1)
@@ -122,19 +141,24 @@ export default function LibraryPanel({ sessionId }: LibraryPanelProps): React.JS
             )}
             {items.map((item, index) => {
               const { size, color } = libraryVisual(item.sizeBytes)
+              const isLink = item.kind === 'link'
+              const missing = isLink && item.missing
+              const iconColor = missing ? '#555' : color
               const kindLabel = item.mimeType.startsWith('image/') ? 'IMG' : item.mimeType === 'application/pdf' ? 'PDF' : 'FILE'
+              const tooltip = missing
+                ? `${item.fileName}\n\nMissing — drag a file or folder onto this tile to relink it.`
+                : item.description
+                  ? `${item.fileName}\n\n${item.description}`
+                  : item.fileName
               return (
                 <button
                   key={item.id}
                   onClick={() => handleOpen(item.id)}
-                  title={item.description ? `${item.fileName}\n\n${item.description}` : item.fileName}
+                  title={tooltip}
                   draggable
                   onDragStart={() => setDragIndex(index)}
                   onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault()
-                    handleDrop(index)
-                  }}
+                  onDrop={(e) => handleDrop(e, index, item)}
                   onDragEnd={() => setDragIndex(null)}
                   style={{
                     display: 'flex',
@@ -147,24 +171,29 @@ export default function LibraryPanel({ sessionId }: LibraryPanelProps): React.JS
                     border: 'none',
                     cursor: 'grab',
                     color: '#eee',
-                    opacity: dragIndex === index ? 0.4 : 1
+                    opacity: dragIndex === index ? 0.4 : missing ? 0.6 : 1
                   }}
                 >
                   <span
                     style={{
                       width: size,
                       height: size,
-                      borderRadius: 8,
-                      backgroundColor: color,
+                      flexShrink: 0,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       fontSize: 10,
                       fontWeight: 600,
-                      flexShrink: 0
+                      ...(isLink
+                        ? {
+                            backgroundColor: iconColor,
+                            clipPath: 'polygon(50% 4%, 4% 96%, 96% 96%)',
+                            border: missing ? '1px dashed #999' : 'none'
+                          }
+                        : { backgroundColor: iconColor, borderRadius: 8 })
                     }}
                   >
-                    {kindLabel}
+                    {!isLink && kindLabel}
                   </span>
                   <span
                     style={{
@@ -177,7 +206,7 @@ export default function LibraryPanel({ sessionId }: LibraryPanelProps): React.JS
                       width: '100%'
                     }}
                   >
-                    {item.description ? item.description.slice(0, 40) : item.fileName}
+                    {missing ? `${item.fileName} (missing)` : item.description ? item.description.slice(0, 40) : item.fileName}
                   </span>
                   <span style={{ fontSize: 9, opacity: 0.5 }}>{formatSize(item.sizeBytes)}</span>
                 </button>

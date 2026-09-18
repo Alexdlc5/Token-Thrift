@@ -13,6 +13,7 @@ import {
   createSession,
   createTask,
   deleteSession,
+  findLibraryLinkByName,
   getSessionDocument,
   getTask,
   isDocumentModeEnabled,
@@ -22,6 +23,7 @@ import {
   listSessions,
   listTasks,
   markMessagesCompressed,
+  relinkLibraryItem,
   renameSession,
   reorderLibraryItems,
   setDocumentMode,
@@ -205,6 +207,32 @@ assert.deepStrictEqual(
   [itemA.id, itemC.id, itemB.id],
   'explicit order persists and overrides the created_at fallback'
 )
+assert.strictEqual(itemA.kind, 'file', 'kind defaults to file when not specified')
+
+// --- library links (agent-written projects) ---
+
+const link = addLibraryItem({
+  sessionId: session.id,
+  fileName: 'pong-game',
+  filePath: '/Users/x/Documents/Token Thrift Projects/pong-game',
+  mimeType: 'inode/directory',
+  sizeBytes: 500,
+  description: null,
+  kind: 'link'
+})
+assert.strictEqual(link.kind, 'link')
+assert.strictEqual(
+  findLibraryLinkByName(session.id, 'pong-game')?.id,
+  link.id,
+  'a link is found by session + exact name, for resuming a project across turns'
+)
+assert.strictEqual(findLibraryLinkByName(session.id, 'no-such-project'), undefined)
+assert.strictEqual(findLibraryLinkByName(session.id, 'a.png'), undefined, 'a plain file is never returned as a link')
+
+const relinked = relinkLibraryItem(link.id, '/Users/x/Documents/Token Thrift Projects/pong-game-2', 900)
+assert.strictEqual(relinked.sizeBytes, 900, 'relink refreshes the stored size')
+assert.strictEqual(listLibraryItems(session.id).find((i) => i.id === link.id)?.sizeBytes, 900, 'change is persisted')
+assert.throws(() => relinkLibraryItem('does-not-exist', '/tmp/x', 0))
 
 // --- delete ---
 

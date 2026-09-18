@@ -74,6 +74,10 @@ export interface ModelOverrides {
   fastReasoning?: boolean
   /** Lets the model hand off an image-generation prompt instead of saying it can't make images. */
   imageGeneration?: boolean
+  /** Lets the model write real multi-file projects to disk via the <write_files> response
+   * convention (see main/agent-files.ts) — off by default, unlike imageGeneration, since it
+   * touches the real filesystem outside the app's own sandboxed library storage. */
+  agentFileAccess?: boolean
 }
 
 export interface ProviderStatus {
@@ -107,17 +111,28 @@ export interface SessionDocument {
 }
 
 /**
- * One file saved into a session's on-disk library (userData/library/<sessionId>/...) —
- * every loaded reference file and every generated image lands here, in addition to (not
- * instead of) whatever's currently in the single-slot document panel. `description` is the
- * vision-read summary for an uploaded image, or the original prompt for a generated one.
+ * One item in a session's library. Most are 'file': copied into the app's own storage
+ * (userData/library/<sessionId>/...) — every loaded reference file and every generated image
+ * lands here, in addition to (not instead of) whatever's currently in the single-slot
+ * document panel. `description` is the vision-read summary for an uploaded image, or the
+ * original prompt for a generated one.
+ *
+ * A 'link' item is different: nothing is copied. It's a reference to a real path elsewhere on
+ * disk — currently only created by the agent file-writing tool (main/agent-files.ts) for a
+ * project it just wrote, so the result is a real, findable folder outside the app's own data
+ * directory rather than something buried in userData. `missing` is computed live each list
+ * call (the target may have moved or been deleted since) — the UI lets the user drag a
+ * replacement file/folder onto a missing link to fix its stored path.
  */
 export interface LibraryItem {
   id: string
   sessionId: string
+  kind: 'file' | 'link'
   fileName: string
   mimeType: string
   sizeBytes: number
   description: string | null
   createdAt: number
+  /** Only meaningful for kind: 'link' — true when the stored path no longer exists. */
+  missing?: boolean
 }

@@ -63,6 +63,7 @@ const api: TokenThriftApi = {
   openLibraryItem: (id) => ipcRenderer.invoke(IPC.library.open, id),
   reorderLibraryItems: (sessionId, orderedIds) =>
     ipcRenderer.invoke(IPC.library.reorder, sessionId, orderedIds),
+  relinkLibraryItem: (id, newPath) => ipcRenderer.invoke(IPC.library.relink, id, newPath),
 
   onTaskUpdate: (cb) => on<TaskRow>(IPC.events.taskUpdate, cb),
   onChatChunk: (cb) => on<ChatStreamChunk>(IPC.events.chatChunk, cb),

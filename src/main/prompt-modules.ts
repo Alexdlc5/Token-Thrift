@@ -7,6 +7,7 @@ import { app } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ModelOverrides, SessionDocument } from '@shared/models'
+import type { WriteFilesRequest } from './agent-files'
 
 // Resolved lazily inside readModule(), not at module load, so this file stays importable
 // (for extractDocumentUpdate's self-check below) outside a real Electron runtime — matching
@@ -127,6 +128,65 @@ export function extractImageGenerationRequest(
   return result ? { prompt: result.inner, remainder: result.remainder } : null
 }
 
+// Agent-level file access: same response-convention pattern as document editing and image
+// generation, not a native tool-calling integration — this app has to work across ten
+// free-tier providers, several of which don't support (or don't reliably support) function
+// calling, so every "capability" here is plain text the model emits and main/index.ts parses.
+// Plain "### FILE: path" markers instead of a JSON body: asking a weak free model to emit
+// properly-escaped JSON containing verbatim multi-file source code is exactly the kind of
+// thing that reliably breaks (unescaped quotes/newlines) — raw text with a delimiter line has
+// nothing to escape. See main/agent-files.ts for where these paths actually get written
+// (including the path-traversal guard) and db/repository.ts's findLibraryLinkByName for how a
+// same-named project resumes into its existing folder across turns instead of duplicating.
+const WRITE_FILES_TAG = 'write_files'
+
+function buildFileAgentInstruction(): string {
+  return [
+    'You can write real files to disk for the user — when asked to build, scaffold, or ' +
+      'create an app/script/project (not just explain or show a snippet), do not just print ' +
+      'code blocks for the user to copy by hand. Write the actual files using this exact ' +
+      'format, with nothing else inside the tags:',
+    `<${WRITE_FILES_TAG}>\n### PROJECT: <short-project-name>\n### FILE: <relative/path/one.ext>\n<full file contents>\n### FILE: <relative/path/two.ext>\n<full file contents>\n</${WRITE_FILES_TAG}>`,
+    'Rules: give every file its FULL contents, never a diff or a "// ... rest unchanged" ' +
+      'placeholder — each ### FILE section completely replaces that file. Use relative paths ' +
+      'only (e.g. "src/main.js" — never "/etc/...", "C:\\...", or anything starting with ' +
+      '"../"). Keep the project name short and exactly the same across a conversation about ' +
+      'the same project, so a later request ("now add X") lands in the same project instead ' +
+      'of creating a duplicate. Only use this when real files are actually being created or ' +
+      "changed — for questions, explanations, or a single snippet that isn't meant to be run " +
+      'as-is, just answer normally without it.'
+  ].join('\n\n')
+}
+
+/** Splits a `<write_files>` block's inner text on its `### PROJECT:`/`### FILE:` markers.
+ * Plain text markers, not JSON — see the comment above buildFileAgentInstruction for why. */
+function parseWriteFilesBlock(inner: string): WriteFilesRequest | null {
+  const projectMatch = inner.match(/^### PROJECT:\s*(.+)$/m)
+  if (!projectMatch || projectMatch.index === undefined) return null
+  const project = projectMatch[1].trim()
+  if (!project) return null
+
+  const afterProject = inner.slice(projectMatch.index + projectMatch[0].length)
+  const parts = afterProject.split(/^### FILE:\s*(.+)$/m)
+  const files: { path: string; content: string }[] = []
+  for (let i = 1; i < parts.length; i += 2) {
+    const path = parts[i].trim()
+    if (path) files.push({ path, content: (parts[i + 1] ?? '').trim() })
+  }
+  return files.length > 0 ? { project, files } : null
+}
+
+/** Pulls the last `<write_files>...</write_files>` block out of a response and parses its
+ * project/file markers, if present and well-formed. */
+export function extractWriteFilesRequest(
+  responseText: string
+): { request: WriteFilesRequest; remainder: string } | null {
+  const result = extractTaggedBlock(responseText, WRITE_FILES_TAG)
+  if (!result) return null
+  const request = parseWriteFilesBlock(result.inner)
+  return request ? { request, remainder: result.remainder } : null
+}
+
 // Some free/weaker models are fine-tuned on agentic tool-calling data and emit their own
 // trained tool-call syntax (e.g. Hermes-style <|tool_call_start|>[fn(...)]<|tool_call_end|>)
 // even though this app never sends a `tools` schema — seen in the wild triggered by the
@@ -152,7 +212,7 @@ export function sanitizeAssistantText(text: string): string {
  * updated document) is ready.
  */
 export function findEarliestTagStart(text: string): number {
-  const indices = [`<${DOCUMENT_TAG}>`, `<${IMAGE_TAG}>`]
+  const indices = [`<${DOCUMENT_TAG}>`, `<${IMAGE_TAG}>`, `<${WRITE_FILES_TAG}>`]
     .map((tag) => text.indexOf(tag))
     .filter((i) => i !== -1)
   return indices.length > 0 ? Math.min(...indices) : -1
@@ -176,6 +236,7 @@ export function buildSystemPrompt(
   if (documentContext?.modeEnabled) parts.push(buildDocumentInstruction(documentContext.document))
   if (documentContext?.document?.kind === 'file') parts.push(buildReferenceFileInstruction(documentContext.document))
   if (overrides?.imageGeneration) parts.push(buildImageGenerationInstruction())
+  if (overrides?.agentFileAccess) parts.push(buildFileAgentInstruction())
   return parts.length > 0 ? parts.join('\n\n') : null
 }
 
@@ -240,8 +301,46 @@ if (require.main === module) {
   assert.strictEqual(findEarliestTagStart('just chatting'), -1)
   assert.strictEqual(findEarliestTagStart('Sure! <generate_image>a red apple'), 6)
   assert.strictEqual(findEarliestTagStart('Here: <document>\ncontent'), 6)
+  assert.strictEqual(findEarliestTagStart('Sure! <write_files>\n### PROJECT: x'), 6)
   // Both tags present (shouldn't normally happen, but the earliest one wins either way).
   assert.strictEqual(findEarliestTagStart('a<document>b<generate_image>c'), 1)
+
+  assert.strictEqual(extractWriteFilesRequest('just chatting, nothing to build'), null)
+
+  const project = extractWriteFilesRequest(
+    "Here's your Pong game!\n\n" +
+      '<write_files>\n' +
+      '### PROJECT: pong-game\n' +
+      '### FILE: package.json\n' +
+      '{\n  "name": "pong-game"\n}\n' +
+      '### FILE: main.js\n' +
+      "const { app } = require('electron')\n" +
+      '</write_files>\n\n' +
+      'Run npm install then npm start.'
+  )
+  assert.strictEqual(project?.request.project, 'pong-game')
+  assert.deepStrictEqual(project?.request.files, [
+    { path: 'package.json', content: '{\n  "name": "pong-game"\n}' },
+    { path: 'main.js', content: "const { app } = require('electron')" }
+  ])
+  assert.strictEqual(project?.remainder, "Here's your Pong game!\n\nRun npm install then npm start.")
+
+  // Opened but never closed (cut off mid-generation) — same unclosed-tag fallback as the
+  // other tags, so raw block syntax never leaks into the visible reply.
+  const unclosedFiles = extractWriteFilesRequest(
+    '<write_files>\n### PROJECT: half-done\n### FILE: index.html\n<h1>hi</h1'
+  )
+  assert.strictEqual(unclosedFiles?.request.project, 'half-done')
+  assert.deepStrictEqual(unclosedFiles?.request.files, [{ path: 'index.html', content: '<h1>hi</h1' }])
+
+  // A block with no FILE markers at all isn't a real request — don't hand back an empty
+  // project that would just create an empty folder.
+  assert.strictEqual(extractWriteFilesRequest('<write_files>\n### PROJECT: nothing here\n</write_files>'), null)
+  // No PROJECT marker at all — malformed, ignore it rather than guess a name.
+  assert.strictEqual(
+    extractWriteFilesRequest('<write_files>\n### FILE: a.txt\ncontent\n</write_files>'),
+    null
+  )
 
   console.log('prompt-modules self-check passed')
 }

@@ -16,7 +16,7 @@ function libraryDir(sessionId: string): string {
 }
 
 /** Strips anything that isn't safe in a filename across Windows/macOS/Linux. */
-function sanitizeFileName(name: string): string {
+export function sanitizeFileName(name: string): string {
   return name.replace(/[/\\?%*:|"<>]/g, '_').slice(0, 120) || 'file'
 }
 

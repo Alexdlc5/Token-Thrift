@@ -32,5 +32,9 @@ export const DEFAULT_OVERRIDES: ModelOverrides = {
   // just apologizing, per the user's ask. Needs a Cloudflare Workers AI key in Settings to
   // actually produce anything; otherwise it fails with a clear message, same as any other
   // unconfigured provider.
-  imageGeneration: true
+  imageGeneration: true,
+  // Off by default, unlike imageGeneration — this writes real files under the user's
+  // Documents folder rather than staying inside the app's own sandboxed library storage, so
+  // it's an explicit opt-in per session rather than always-on.
+  agentFileAccess: false
 }

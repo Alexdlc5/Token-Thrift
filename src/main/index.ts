@@ -1,12 +1,15 @@
 import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { join } from 'node:path'
+import { existsSync, statSync } from 'node:fs'
 import { IPC } from '@shared/ipc-contract'
 import { getDb } from './db/schema'
 import {
+  addLibraryItem,
   addMessage,
   createSession,
   createTask,
   deleteSession,
+  findLibraryLinkByName,
   getSession,
   getSessionDocument,
   isDocumentModeEnabled,
@@ -14,6 +17,7 @@ import {
   listMessagesForModel,
   listSessions,
   listTasks,
+  relinkLibraryItem,
   renameSession,
   setDocumentMode,
   setSessionArchived,
@@ -26,6 +30,7 @@ import {
   buildSystemPrompt,
   extractDocumentUpdate,
   extractImageGenerationRequest,
+  extractWriteFilesRequest,
   findEarliestTagStart,
   sanitizeAssistantText
 } from './prompt-modules'
@@ -33,6 +38,7 @@ import { fitHistoryToBudget } from './context-window'
 import { maybeCompressSession } from './context-compression'
 import { cloudflareImageProvider } from './image-providers/cloudflare-image'
 import { readImage } from './image-providers/cloudflare-vision'
+import { folderSizeBytes, writeProjectFiles } from './agent-files'
 import { saveToLibrary, getLibraryItemPath, deleteLibraryDir } from './library'
 import { listLibraryItems, reorderLibraryItems } from './db/repository'
 import {
@@ -332,6 +338,41 @@ async function runChatTask(
       }
     }
 
+    if (overrides?.agentFileAccess) {
+      const filesRequest = extractWriteFilesRequest(assistantContent)
+      if (filesRequest) {
+        assistantContent = filesRequest.remainder
+        try {
+          // Same project name as an earlier link in this session resumes into its existing
+          // folder (a follow-up "now add X") instead of creating a duplicate.
+          const existingLink = findLibraryLinkByName(sessionId, filesRequest.request.project)
+          const existingPath = existingLink ? (getLibraryItemPath(existingLink.id) ?? null) : null
+          const { projectPath, totalBytes } = writeProjectFiles(filesRequest.request, existingPath)
+          if (existingLink) {
+            relinkLibraryItem(existingLink.id, projectPath, totalBytes)
+          } else {
+            addLibraryItem({
+              sessionId,
+              fileName: filesRequest.request.project,
+              filePath: projectPath,
+              mimeType: 'inode/directory',
+              sizeBytes: totalBytes,
+              description: null,
+              kind: 'link'
+            })
+          }
+          win?.webContents.send(IPC.events.libraryUpdated, { sessionId })
+          const fileList = filesRequest.request.files.map((f) => f.path).join(', ')
+          assistantContent =
+            assistantContent ||
+            `_Wrote "${filesRequest.request.project}" (${fileList}) to your Documents folder — see the library below._`
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          assistantContent = [assistantContent, `_Writing files failed: ${message}_`].filter(Boolean).join('\n\n')
+        }
+      }
+    }
+
     addMessage(sessionId, 'assistant', assistantContent, result.reasoning || undefined)
     const done = updateTask(task.id, {
       status: 'done',
@@ -506,7 +547,15 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.document.getMode, async (_e, sessionId) => isDocumentModeEnabled(sessionId))
   ipcMain.handle(IPC.document.setMode, async (_e, sessionId, enabled) => setDocumentMode(sessionId, enabled))
 
-  ipcMain.handle(IPC.library.list, async (_e, sessionId) => listLibraryItems(sessionId))
+  ipcMain.handle(IPC.library.list, async (_e, sessionId) => {
+    // 'missing' is computed fresh on every list call, not stored — a link's real target can
+    // move or get deleted at any time outside the app's knowledge.
+    return listLibraryItems(sessionId).map((item) => {
+      if (item.kind !== 'link') return item
+      const path = getLibraryItemPath(item.id)
+      return { ...item, missing: !path || !existsSync(path) }
+    })
+  })
   ipcMain.handle(IPC.library.open, async (_e, id) => {
     const path = getLibraryItemPath(id)
     if (!path) throw new Error(`No library item with id "${id}"`)
@@ -514,6 +563,12 @@ function registerIpcHandlers(): void {
     if (result) throw new Error(`Could not open file: ${result}`)
   })
   ipcMain.handle(IPC.library.reorder, async (_e, _sessionId, orderedIds) => reorderLibraryItems(orderedIds))
+  ipcMain.handle(IPC.library.relink, async (_e, id, newPath) => {
+    if (!existsSync(newPath)) throw new Error('That path no longer exists')
+    const stat = statSync(newPath)
+    const sizeBytes = stat.isDirectory() ? folderSizeBytes(newPath) : stat.size
+    return relinkLibraryItem(id, newPath, sizeBytes)
+  })
 }
 
 // A second launch (e.g. double-clicking the desktop shortcut while a previous instance is
