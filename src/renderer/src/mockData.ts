@@ -15,6 +15,11 @@ export const PROVIDER_LABELS: Record<ProviderId, string> = {
   zhipu: 'Z.ai (GLM)'
 }
 
+// The one place this list is derived — every provider-agnostic loop (Settings, App's
+// per-provider status state) imports this instead of keeping its own copy, so adding a
+// provider here is the only place that can be forgotten.
+export const ALL_PROVIDERS = Object.keys(PROVIDER_LABELS) as ProviderId[]
+
 export const DEFAULT_OVERRIDES: ModelOverrides = {
   temperature: 0.7,
   topP: 1,

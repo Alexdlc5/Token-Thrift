@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { ModelOverrides, ProviderId, SessionSummary, StoredKeyInfo } from '@shared/models'
-import { PROVIDER_LABELS } from './mockData'
+import { ALL_PROVIDERS, PROVIDER_LABELS } from './mockData'
 
 interface SettingsScreenProps {
   apiKeysByProvider: Record<ProviderId, StoredKeyInfo[]>
@@ -14,8 +14,6 @@ interface SettingsScreenProps {
   overrides: ModelOverrides
   onUpdateOverrides: (patch: Partial<ModelOverrides>) => void
 }
-
-const ALL_PROVIDERS = Object.keys(PROVIDER_LABELS) as ProviderId[]
 
 function ProviderKeysCard({
   providerId,

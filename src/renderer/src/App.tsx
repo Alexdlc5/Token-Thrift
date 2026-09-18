@@ -8,18 +8,7 @@ import TaskMonitorPanel from './TaskMonitorPanel'
 import UsageTracker from './UsageTracker'
 import DocumentPanel from './DocumentPanel'
 import LibraryPanel from './LibraryPanel'
-import { DEFAULT_OVERRIDES } from './mockData'
-
-const ALL_PROVIDERS: ProviderId[] = [
-  'openrouter',
-  'groq',
-  'google-ai-studio',
-  'cerebras',
-  'nvidia-nim',
-  'huggingface',
-  'mistral',
-  'cloudflare-workers-ai'
-]
+import { ALL_PROVIDERS, DEFAULT_OVERRIDES } from './mockData'
 
 function emptyRecord<T>(fill: T): Record<ProviderId, T> {
   return Object.fromEntries(ALL_PROVIDERS.map((id) => [id, fill])) as Record<ProviderId, T>
