@@ -47,6 +47,12 @@ export interface ChatMessage {
 
 export type TaskStatus = 'queued' | 'streaming' | 'done' | 'error'
 
+/** 'chat' is a normal model call. 'execution' is a real command the agent ran (see
+ * main/code-execution.ts) — providerId/modelId are still the session's own, since the run
+ * happens in that session's context, but promptTokens/completionTokens/costUsd/systemPrompt
+ * are meaningless for it and stay null; command/stdout/stderr/exitCode are what matter. */
+export type TaskKind = 'chat' | 'execution'
+
 export interface TaskRow {
   id: string
   parentTaskId: string | null
@@ -62,6 +68,11 @@ export interface TaskRow {
   error: string | null
   /** The resolved system prompt actually sent (custom prompt + active efficiency modules, §5), for inspection in the task monitor. */
   systemPrompt: string | null
+  kind: TaskKind
+  command: string | null
+  stdout: string | null
+  stderr: string | null
+  exitCode: number | null
 }
 
 export interface ModelOverrides {
@@ -83,6 +94,11 @@ export interface ModelOverrides {
    * When set, this exact folder is the target (no per-project subfolder nesting) — picking a
    * specific folder is usually "work inside my existing project", not "start a new one". */
   agentWorkingDir?: string
+  /** Lets the model run a real command (one at a time, via <run_command>) in its working
+   * directory to test what it just wrote — off by default, and only meaningful alongside
+   * agentFileAccess (there's no working directory to run in otherwise). See
+   * main/code-execution.ts for the sandboxing (timeout, denylist, output caps). */
+  agentCodeExecution?: boolean
 }
 
 export interface ProviderStatus {

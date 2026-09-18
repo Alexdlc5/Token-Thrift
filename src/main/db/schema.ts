@@ -50,7 +50,12 @@ CREATE TABLE IF NOT EXISTS tasks (
   started_at INTEGER NOT NULL,
   ended_at INTEGER,
   error TEXT,
-  system_prompt TEXT
+  system_prompt TEXT,
+  kind TEXT NOT NULL DEFAULT 'chat',
+  command TEXT,
+  stdout TEXT,
+  stderr TEXT,
+  exit_code INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id);
@@ -88,7 +93,12 @@ const COLUMN_MIGRATIONS: string[] = [
   'ALTER TABLE library_items ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0',
   "ALTER TABLE library_items ADD COLUMN item_kind TEXT NOT NULL DEFAULT 'file'",
   'ALTER TABLE sessions ADD COLUMN overrides_json TEXT',
-  'ALTER TABLE sessions ADD COLUMN draft_text TEXT'
+  'ALTER TABLE sessions ADD COLUMN draft_text TEXT',
+  "ALTER TABLE tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'",
+  'ALTER TABLE tasks ADD COLUMN command TEXT',
+  'ALTER TABLE tasks ADD COLUMN stdout TEXT',
+  'ALTER TABLE tasks ADD COLUMN stderr TEXT',
+  'ALTER TABLE tasks ADD COLUMN exit_code INTEGER'
 ]
 
 export function applyColumnMigrations(database: DatabaseSync): void {
@@ -144,6 +154,11 @@ if (require.main === module) {
   assert.ok(libraryCols.includes('item_kind'), 'item_kind column added to an old-shape library_items table')
   assert.ok(sessionCols.includes('overrides_json'), 'overrides_json column added to an old-shape sessions table')
   assert.ok(sessionCols.includes('draft_text'), 'draft_text column added to an old-shape sessions table')
+  assert.ok(taskCols.includes('kind'), 'kind column added to an old-shape tasks table')
+  assert.ok(taskCols.includes('command'), 'command column added to an old-shape tasks table')
+  assert.ok(taskCols.includes('stdout'), 'stdout column added to an old-shape tasks table')
+  assert.ok(taskCols.includes('stderr'), 'stderr column added to an old-shape tasks table')
+  assert.ok(taskCols.includes('exit_code'), 'exit_code column added to an old-shape tasks table')
   assert.strictEqual(
     oldShapeDb.prepare('SELECT content FROM messages WHERE id = ?').get('m1')?.content,
     'hello',

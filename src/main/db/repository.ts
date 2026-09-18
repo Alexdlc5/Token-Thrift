@@ -15,6 +15,7 @@ import type {
   ProviderId,
   SessionDocument,
   SessionSummary,
+  TaskKind,
   TaskRow,
   TaskStatus
 } from '@shared/models'
@@ -88,6 +89,11 @@ interface TaskDbRow {
   ended_at: number | null
   error: string | null
   system_prompt: string | null
+  kind: TaskKind
+  command: string | null
+  stdout: string | null
+  stderr: string | null
+  exit_code: number | null
 }
 
 function mapTask(row: TaskDbRow): TaskRow {
@@ -104,7 +110,12 @@ function mapTask(row: TaskDbRow): TaskRow {
     startedAt: row.started_at,
     endedAt: row.ended_at,
     error: row.error,
-    systemPrompt: row.system_prompt
+    systemPrompt: row.system_prompt,
+    kind: row.kind,
+    command: row.command,
+    stdout: row.stdout,
+    stderr: row.stderr,
+    exitCode: row.exit_code
   }
 }
 
@@ -313,6 +324,11 @@ export interface CreateTaskInput {
   providerId: ProviderId
   modelId: string
   systemPrompt?: string | null
+  /** Defaults to 'chat'. Pass 'execution' for a real command run via <run_command> (see
+   * main/code-execution.ts) — command/stdout/stderr/exitCode are set via updateTask instead
+   * of at creation, since the task is created in 'queued' status before the command runs. */
+  kind?: TaskKind
+  command?: string | null
 }
 
 export function createTask(input: CreateTaskInput): TaskRow {
@@ -329,13 +345,18 @@ export function createTask(input: CreateTaskInput): TaskRow {
     startedAt: Date.now(),
     endedAt: null,
     error: null,
-    systemPrompt: input.systemPrompt ?? null
+    systemPrompt: input.systemPrompt ?? null,
+    kind: input.kind ?? 'chat',
+    command: input.command ?? null,
+    stdout: null,
+    stderr: null,
+    exitCode: null
   }
   conn()
     .prepare(
       `INSERT INTO tasks
-         (id, parent_task_id, session_id, provider_id, model_id, status, prompt_tokens, completion_tokens, cost_usd, started_at, ended_at, error, system_prompt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         (id, parent_task_id, session_id, provider_id, model_id, status, prompt_tokens, completion_tokens, cost_usd, started_at, ended_at, error, system_prompt, kind, command, stdout, stderr, exit_code)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       task.id,
@@ -350,12 +371,22 @@ export function createTask(input: CreateTaskInput): TaskRow {
       task.startedAt,
       task.endedAt,
       task.error,
-      task.systemPrompt
+      task.systemPrompt,
+      task.kind,
+      task.command,
+      task.stdout,
+      task.stderr,
+      task.exitCode
     )
   return task
 }
 
-type TaskPatch = Partial<Pick<TaskRow, 'status' | 'promptTokens' | 'completionTokens' | 'costUsd' | 'endedAt' | 'error'>>
+type TaskPatch = Partial<
+  Pick<
+    TaskRow,
+    'status' | 'promptTokens' | 'completionTokens' | 'costUsd' | 'endedAt' | 'error' | 'stdout' | 'stderr' | 'exitCode'
+  >
+>
 
 const TASK_PATCH_COLUMNS: Record<keyof TaskPatch, string> = {
   status: 'status',
@@ -363,7 +394,10 @@ const TASK_PATCH_COLUMNS: Record<keyof TaskPatch, string> = {
   completionTokens: 'completion_tokens',
   costUsd: 'cost_usd',
   endedAt: 'ended_at',
-  error: 'error'
+  error: 'error',
+  stdout: 'stdout',
+  stderr: 'stderr',
+  exitCode: 'exit_code'
 }
 
 export function updateTask(id: string, patch: TaskPatch): TaskRow {

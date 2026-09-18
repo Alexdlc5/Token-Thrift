@@ -326,7 +326,17 @@ export default function SettingsScreen({
             Agent file access — let the model write (and read) real project files
           </label>
           {overrides.agentFileAccess && (
-            <WorkingDirField overrides={overrides} onUpdateOverrides={onUpdateOverrides} />
+            <>
+              <WorkingDirField overrides={overrides} onUpdateOverrides={onUpdateOverrides} />
+              <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={overrides.agentCodeExecution ?? false}
+                  onChange={(e) => onUpdateOverrides({ agentCodeExecution: e.target.checked })}
+                />
+                Allow code execution — let the model run real commands (tests, builds) to check its own work
+              </label>
+            </>
           )}
 
           <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid #333' }}>

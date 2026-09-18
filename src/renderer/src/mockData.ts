@@ -36,5 +36,8 @@ export const DEFAULT_OVERRIDES: ModelOverrides = {
   // Off by default, unlike imageGeneration — this writes real files under the user's
   // Documents folder rather than staying inside the app's own sandboxed library storage, so
   // it's an explicit opt-in per session rather than always-on.
-  agentFileAccess: false
+  agentFileAccess: false,
+  // Off by default, and meaningfully riskier than agentFileAccess alone — this actually
+  // executes shell commands (see main/code-execution.ts).
+  agentCodeExecution: false
 }

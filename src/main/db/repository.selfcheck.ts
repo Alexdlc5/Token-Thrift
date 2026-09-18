@@ -139,6 +139,34 @@ for (let i = 0; i + 1 < allTasks.length; i++) {
   assert.ok(allTasks[i].startedAt >= allTasks[i + 1].startedAt)
 }
 
+// 'chat' is the default kind, unset until asked for — an execution task carries its command
+// up front and gets stdout/stderr/exitCode patched in once the command finishes.
+assert.strictEqual(parentTask.kind, 'chat')
+const execTask = createTask({
+  parentTaskId: null,
+  sessionId: session.id,
+  providerId: 'groq',
+  modelId: 'llama-3.1-70b',
+  kind: 'execution',
+  command: 'npm test'
+})
+assert.strictEqual(execTask.kind, 'execution')
+assert.strictEqual(execTask.command, 'npm test')
+assert.strictEqual(execTask.stdout, null)
+
+const updatedExecTask = updateTask(execTask.id, {
+  status: 'done',
+  stdout: 'all tests passed',
+  stderr: '',
+  exitCode: 0,
+  endedAt: Date.now()
+})
+assert.strictEqual(updatedExecTask.stdout, 'all tests passed')
+assert.strictEqual(updatedExecTask.stderr, '')
+assert.strictEqual(updatedExecTask.exitCode, 0)
+// command set at creation survives a patch that doesn't touch it
+assert.strictEqual(updatedExecTask.command, 'npm test')
+
 // --- archive ---
 
 setSessionArchived(session.id, true)

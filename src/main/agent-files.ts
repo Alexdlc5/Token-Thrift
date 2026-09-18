@@ -51,6 +51,42 @@ export function safeJoin(root: string, relativePath: string): string {
   return resolved
 }
 
+// A cheap, deterministic "does this look finished" tripwire for a file the model just wrote —
+// a bracket-balance count, not a real parser (doesn't understand strings/comments/template
+// literals, so it can false-positive on a file that's actually fine). That's an acceptable
+// trade: this only ever produces a warning appended to the reply, never blocks the write, and
+// the goal is catching the common "free model got cut off by its own token limit mid-file"
+// case for free, instead of spending a whole extra LLM call asking the model to check its own
+// work.
+const BRACKET_PAIRS: [string, string][] = [
+  ['{', '}'],
+  ['(', ')'],
+  ['[', ']']
+]
+const BRACKET_CHECK_EXTENSIONS = new Set([
+  '.js', '.jsx', '.ts', '.tsx', '.json', '.java', '.c', '.cpp', '.h', '.go', '.rs', '.css', '.py'
+])
+
+function countChar(text: string, char: string): number {
+  let count = 0
+  for (const c of text) if (c === char) count++
+  return count
+}
+
+/** null when the file looks fine (or isn't a checked extension) — a short warning string
+ * otherwise, meant to be appended to the assistant's reply, not to block anything. */
+export function checkFileCompleteness(path: string, content: string): string | null {
+  if (!BRACKET_CHECK_EXTENSIONS.has(extname(path))) return null
+  for (const [open, close] of BRACKET_PAIRS) {
+    const openCount = countChar(content, open)
+    const closeCount = countChar(content, close)
+    if (openCount !== closeCount) {
+      return `${path} looks unbalanced (${openCount}× "${open}" vs ${closeCount}× "${close}") — it may have been cut off before finishing.`
+    }
+  }
+  return null
+}
+
 /** Also reused by main/index.ts's relink handler — a drag-and-dropped replacement folder
  * needs the same total-size computation a freshly written project gets. */
 export function folderSizeBytes(dir: string): number {
@@ -321,6 +357,13 @@ if (require.main === module) {
   const bigSnapshot = snapshotWorkingDirectory(bigDir)
   assert.deepStrictEqual(bigSnapshot?.paths.sort(), ['binary.png', 'huge.js'], 'still listed even when skipped')
   assert.deepStrictEqual(bigSnapshot?.excerpts, [], 'oversized file and non-text extension both excluded from content')
+
+  // --- checkFileCompleteness ---
+
+  assert.strictEqual(checkFileCompleteness('index.js', 'function f() { return 1 }'), null, 'balanced file passes')
+  assert.strictEqual(checkFileCompleteness('index.js', 'function f() { return 1'), 'index.js looks unbalanced (1× "{" vs 0× "}") — it may have been cut off before finishing.')
+  assert.strictEqual(checkFileCompleteness('README.md', 'some prose with a stray {'), null, 'non-code extension is never checked')
+  assert.strictEqual(checkFileCompleteness('a.py', 'def f(x):\n    return (x'), 'a.py looks unbalanced (2× "(" vs 1× ")") — it may have been cut off before finishing.')
 
   // --- checkWorkingDirSize / WORKING_DIR_WARN_FILE_COUNT ---
 

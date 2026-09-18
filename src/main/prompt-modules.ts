@@ -195,6 +195,32 @@ export function extractWriteFilesRequest(
   return request ? { request, remainder: result.remainder } : null
 }
 
+// "Test and improve code" — a real command run in the agent's working directory (see
+// main/code-execution.ts), separate from and gated behind its own override so a user who
+// only wants file writing never pays for this instruction. One command at a time, not a
+// shell script: keeps the ask simple for a weak model and keeps the denylist/timeout
+// reasoning in code-execution.ts meaningful (one clear thing to sandbox, not an arbitrary
+// multi-line script).
+const RUN_COMMAND_TAG = 'run_command'
+
+function buildCodeExecutionInstruction(): string {
+  return [
+    'You can also run a real command in the working directory to test what you wrote — ' +
+      'wrap ONE shell command like this:',
+    `<${RUN_COMMAND_TAG}>the exact command, e.g. npm test</${RUN_COMMAND_TAG}>`,
+    "You'll see its real output (or the task monitor will) and can fix problems on your " +
+      'next turn. Only when you actually want to run something — not for every response.'
+  ].join('\n\n')
+}
+
+/** Pulls the last `<run_command>...</run_command>` block out of a response, if present. */
+export function extractRunCommandRequest(
+  responseText: string
+): { command: string; remainder: string } | null {
+  const result = extractTaggedBlock(responseText, RUN_COMMAND_TAG)
+  return result ? { command: result.inner, remainder: result.remainder } : null
+}
+
 // Some free/weaker models are fine-tuned on agentic tool-calling data and emit their own
 // trained tool-call syntax (e.g. Hermes-style <|tool_call_start|>[fn(...)]<|tool_call_end|>)
 // even though this app never sends a `tools` schema — seen in the wild triggered by the
@@ -220,7 +246,7 @@ export function sanitizeAssistantText(text: string): string {
  * updated document) is ready.
  */
 export function findEarliestTagStart(text: string): number {
-  const indices = [`<${DOCUMENT_TAG}>`, `<${IMAGE_TAG}>`, `<${WRITE_FILES_TAG}>`]
+  const indices = [`<${DOCUMENT_TAG}>`, `<${IMAGE_TAG}>`, `<${WRITE_FILES_TAG}>`, `<${RUN_COMMAND_TAG}>`]
     .map((tag) => text.indexOf(tag))
     .filter((i) => i !== -1)
   return indices.length > 0 ? Math.min(...indices) : -1
@@ -248,6 +274,7 @@ export function buildSystemPrompt(
   if (documentContext?.document?.kind === 'file') parts.push(buildReferenceFileInstruction(documentContext.document))
   if (overrides?.imageGeneration) parts.push(buildImageGenerationInstruction())
   if (overrides?.agentFileAccess) parts.push(buildFileAgentInstruction(workingDirSnapshot ?? null))
+  if (overrides?.agentCodeExecution) parts.push(buildCodeExecutionInstruction())
   return parts.length > 0 ? parts.join('\n\n') : null
 }
 
@@ -372,6 +399,26 @@ if (require.main === module) {
     !emptySnapshotPrompt?.includes('Working directory contents'),
     'an empty working directory is treated the same as no snapshot at all'
   )
+
+  assert.strictEqual(extractRunCommandRequest('just chatting, nothing to run'), null)
+
+  const runClosed = extractRunCommandRequest(
+    "Let's verify it works.\n\n<run_command>npm test</run_command>\n\nI'll check the output."
+  )
+  assert.strictEqual(runClosed?.command, 'npm test')
+  assert.strictEqual(runClosed?.remainder, "Let's verify it works.\n\nI'll check the output.")
+
+  // Opened but never closed — same unclosed-tag fallback as the other tags.
+  const runUnclosed = extractRunCommandRequest('<run_command>node index.js')
+  assert.strictEqual(runUnclosed?.command, 'node index.js')
+  assert.strictEqual(runUnclosed?.remainder, '')
+
+  // An opening tag with nothing after it isn't a real request.
+  assert.strictEqual(extractRunCommandRequest('sure, one sec <run_command>'), null)
+
+  const runPrompt = buildSystemPrompt({ agentCodeExecution: true })
+  assert.ok(runPrompt?.includes('<run_command>'), 'code execution instruction is included when the override is on')
+  assert.ok(!buildSystemPrompt({})?.includes('<run_command>'), 'omitted entirely when the override is off')
 
   console.log('prompt-modules self-check passed')
 }

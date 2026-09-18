@@ -34,6 +34,7 @@ import {
   buildSystemPrompt,
   extractDocumentUpdate,
   extractImageGenerationRequest,
+  extractRunCommandRequest,
   extractWriteFilesRequest,
   findEarliestTagStart,
   sanitizeAssistantText
@@ -43,12 +44,14 @@ import { maybeCompressSession } from './context-compression'
 import { cloudflareImageProvider } from './image-providers/cloudflare-image'
 import { readImage } from './image-providers/cloudflare-vision'
 import {
+  checkFileCompleteness,
   checkWorkingDirSize,
   folderSizeBytes,
   projectsRoot,
   snapshotWorkingDirectory,
   writeProjectFiles
 } from './agent-files'
+import { runCommand } from './code-execution'
 import { saveToLibrary, getLibraryItemPath, deleteLibraryDir } from './library'
 import { listLibraryItems, reorderLibraryItems } from './db/repository'
 import {
@@ -98,6 +101,20 @@ function createWindow(): void {
 
 function emitTaskUpdate(win: BrowserWindow | null, task: TaskRow): void {
   win?.webContents.send(IPC.events.taskUpdate, task)
+}
+
+/** Where a <run_command> actually runs. A custom agentWorkingDir always wins; otherwise fall
+ * back to the session's most recently written project (the library 'link' item created by
+ * <write_files> — see the block above) so "run npm test" works on a later turn without the
+ * model having to repeat the project name. null means nothing to run against yet. */
+function resolveAgentWorkingDir(sessionId: string, overrides: ModelOverrides | undefined): string | null {
+  const customDir = overrides?.agentWorkingDir?.trim()
+  if (customDir) return customDir
+  const links = listLibraryItems(sessionId)
+    .filter((item) => item.kind === 'link')
+    .sort((a, b) => b.createdAt - a.createdAt)
+  const latest = links[0]
+  return latest ? (getLibraryItemPath(latest.id) ?? null) : null
 }
 
 interface ChatCandidate {
@@ -383,9 +400,65 @@ async function runChatTask(
           const location = customDir ? projectPath : 'your Documents folder'
           assistantContent =
             assistantContent || `_Wrote "${linkName}" (${fileList}) to ${location} — see the library below._`
+
+          // A weak model cutting off mid-file is the single most common "it didn't finish
+          // the task" complaint — a cheap bracket-balance heuristic (agent-files.ts) catches
+          // the obvious case without spending a token asking the model to check itself.
+          const incompleteWarnings = filesRequest.request.files
+            .map((f) => checkFileCompleteness(f.path, f.content))
+            .filter((w): w is string => Boolean(w))
+          if (incompleteWarnings.length > 0) {
+            assistantContent = [assistantContent, incompleteWarnings.map((w) => `_Note: ${w}_`).join('\n')]
+              .filter(Boolean)
+              .join('\n\n')
+          }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
           assistantContent = [assistantContent, `_Writing files failed: ${message}_`].filter(Boolean).join('\n\n')
+        }
+      }
+    }
+
+    if (overrides?.agentCodeExecution) {
+      const runRequest = extractRunCommandRequest(assistantContent)
+      if (runRequest) {
+        assistantContent = runRequest.remainder
+        const cwd = resolveAgentWorkingDir(sessionId, overrides)
+        if (!cwd) {
+          assistantContent = [
+            assistantContent,
+            '_Could not run that command: no working directory yet — write files first, or set one in Settings._'
+          ]
+            .filter(Boolean)
+            .join('\n\n')
+        } else {
+          const execTask = createTask({
+            parentTaskId: task.id,
+            sessionId,
+            providerId: session.providerId,
+            modelId: session.modelId,
+            kind: 'execution',
+            command: runRequest.command
+          })
+          emitTaskUpdate(win, execTask)
+          const result = await runCommand(cwd, runRequest.command)
+          const doneExecTask = updateTask(execTask.id, {
+            status: result.exitCode === 0 ? 'done' : 'error',
+            stdout: result.stdout,
+            stderr: result.stderr,
+            exitCode: result.exitCode,
+            endedAt: Date.now(),
+            error: result.timedOut ? 'Command timed out' : null
+          })
+          emitTaskUpdate(win, doneExecTask)
+          const outcome = result.timedOut ? 'timed out' : result.exitCode === 0 ? 'succeeded' : `exited ${result.exitCode}`
+          const output = (result.stdout + (result.stderr ? '\n' + result.stderr : '')).trim() || '(no output)'
+          assistantContent = [
+            assistantContent,
+            `_Ran \`${runRequest.command}\` (${outcome}):_\n\`\`\`\n${output}\n\`\`\``
+          ]
+            .filter(Boolean)
+            .join('\n\n')
         }
       }
     }

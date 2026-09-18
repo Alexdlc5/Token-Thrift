@@ -65,36 +65,72 @@ export default function TaskMonitorPanel(): React.JSX.Element {
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
             <span>
-              <StatusDot status={task.status} /> {PROVIDER_LABELS[task.providerId]} · {task.modelId}
+              <StatusDot status={task.status} />{' '}
+              {task.kind === 'execution' ? (
+                <code>{task.command}</code>
+              ) : (
+                <>
+                  {PROVIDER_LABELS[task.providerId]} · {task.modelId}
+                </>
+              )}
             </span>
             <span style={{ opacity: 0.6 }}>{duration}</span>
           </div>
           <div style={{ opacity: 0.6, marginTop: 2 }}>
-            {task.promptTokens ?? '–'}→{task.completionTokens ?? '–'} tok · ${task.costUsd.toFixed(4)}
-            {task.error ? ` · error: ${task.error}` : ''}
+            {task.kind === 'execution' ? (
+              <>
+                exit {task.exitCode ?? '–'}
+                {task.error ? ` · ${task.error}` : ''}
+              </>
+            ) : (
+              <>
+                {task.promptTokens ?? '–'}→{task.completionTokens ?? '–'} tok · ${task.costUsd.toFixed(4)}
+                {task.error ? ` · error: ${task.error}` : ''}
+              </>
+            )}
           </div>
         </div>
         {expanded && (
           <div style={{ padding: '6px 10px', backgroundColor: '#1a1a22', fontSize: 12 }}>
-            <div style={{ marginBottom: 6 }}>
-              <strong>System prompt sent:</strong>
-              <pre style={{ whiteSpace: 'pre-wrap', margin: '4px 0', opacity: 0.85 }}>
-                {task.systemPrompt ?? '(none — no lean-coding/fast-reasoning/custom prompt active)'}
-              </pre>
-            </div>
-            {live?.reasoning && (
-              <div style={{ marginBottom: 6 }}>
-                <strong style={{ color: '#c9a86a' }}>Reasoning:</strong>
-                <pre style={{ whiteSpace: 'pre-wrap', margin: '4px 0', color: '#c9a86a' }}>
-                  {live.reasoning}
-                </pre>
-              </div>
-            )}
-            {live?.answer && (
-              <div>
-                <strong>Answer:</strong>
-                <pre style={{ whiteSpace: 'pre-wrap', margin: '4px 0' }}>{live.answer}</pre>
-              </div>
+            {task.kind === 'execution' ? (
+              <>
+                {task.stdout && (
+                  <div style={{ marginBottom: 6 }}>
+                    <strong>stdout:</strong>
+                    <pre style={{ whiteSpace: 'pre-wrap', margin: '4px 0', opacity: 0.85 }}>{task.stdout}</pre>
+                  </div>
+                )}
+                {task.stderr && (
+                  <div>
+                    <strong style={{ color: '#e05252' }}>stderr:</strong>
+                    <pre style={{ whiteSpace: 'pre-wrap', margin: '4px 0', color: '#e05252' }}>{task.stderr}</pre>
+                  </div>
+                )}
+                {!task.stdout && !task.stderr && <div style={{ opacity: 0.6 }}>(no output yet)</div>}
+              </>
+            ) : (
+              <>
+                <div style={{ marginBottom: 6 }}>
+                  <strong>System prompt sent:</strong>
+                  <pre style={{ whiteSpace: 'pre-wrap', margin: '4px 0', opacity: 0.85 }}>
+                    {task.systemPrompt ?? '(none — no lean-coding/fast-reasoning/custom prompt active)'}
+                  </pre>
+                </div>
+                {live?.reasoning && (
+                  <div style={{ marginBottom: 6 }}>
+                    <strong style={{ color: '#c9a86a' }}>Reasoning:</strong>
+                    <pre style={{ whiteSpace: 'pre-wrap', margin: '4px 0', color: '#c9a86a' }}>
+                      {live.reasoning}
+                    </pre>
+                  </div>
+                )}
+                {live?.answer && (
+                  <div>
+                    <strong>Answer:</strong>
+                    <pre style={{ whiteSpace: 'pre-wrap', margin: '4px 0' }}>{live.answer}</pre>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
