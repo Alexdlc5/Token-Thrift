@@ -20,5 +20,10 @@ export const DEFAULT_OVERRIDES: ModelOverrides = {
   systemPrompt: '',
   reasoningEffort: 'medium',
   leanCoding: false,
-  fastReasoning: false
+  fastReasoning: false,
+  // On by default — "automatically" hand off to real image generation instead of the model
+  // just apologizing, per the user's ask. Needs a Cloudflare Workers AI key in Settings to
+  // actually produce anything; otherwise it fails with a clear message, same as any other
+  // unconfigured provider.
+  imageGeneration: true
 }

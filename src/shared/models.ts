@@ -70,6 +70,8 @@ export interface ModelOverrides {
   reasoningEffort?: 'low' | 'medium' | 'high'
   leanCoding?: boolean
   fastReasoning?: boolean
+  /** Lets the model hand off an image-generation prompt instead of saying it can't make images. */
+  imageGeneration?: boolean
 }
 
 export interface ProviderStatus {

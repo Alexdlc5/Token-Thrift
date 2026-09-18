@@ -98,7 +98,7 @@ async function getCachedModels(forceRefresh = false): Promise<ModelInfo[]> {
 }
 
 /** Splits the stored `accountId:apiToken` key into its two parts. Throws on missing/malformed input. */
-function parseStoredKey(stored: string | null): { accountId: string; apiToken: string } {
+export function parseStoredKey(stored: string | null): { accountId: string; apiToken: string } {
   if (!stored) throw new Error('Cloudflare Workers AI API key is not configured')
   const sepIndex = stored.indexOf(':')
   if (sepIndex <= 0 || sepIndex === stored.length - 1) {

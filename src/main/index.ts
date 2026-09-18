@@ -22,9 +22,15 @@ import {
   updateTask
 } from './db/repository'
 import { getProvider, listProviders } from './providers'
-import { buildSystemPrompt, extractDocumentUpdate } from './prompt-modules'
+import {
+  buildSystemPrompt,
+  extractDocumentUpdate,
+  extractImageGenerationRequest,
+  sanitizeAssistantText
+} from './prompt-modules'
 import { fitHistoryToBudget } from './context-window'
 import { maybeCompressSession } from './context-compression'
+import { cloudflareImageProvider } from './image-providers/cloudflare-image'
 import {
   addApiKey,
   getActiveKeyId,
@@ -142,9 +148,32 @@ async function runChatTask(
       }
     }
 
-    let assistantContent = answer
+    let assistantContent = sanitizeAssistantText(answer)
+
+    if (overrides?.imageGeneration) {
+      const imageRequest = extractImageGenerationRequest(assistantContent)
+      if (imageRequest) {
+        assistantContent = imageRequest.remainder
+        try {
+          const image = await cloudflareImageProvider.generate(imageRequest.prompt)
+          setSessionDocument(sessionId, {
+            kind: 'file',
+            content: image.dataUrl,
+            mimeType: image.mimeType,
+            fileName: 'generated-image.jpg'
+          })
+          assistantContent = assistantContent || '_Generated an image — see the panel above._'
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          assistantContent = [assistantContent, `_Image generation failed: ${message}_`]
+            .filter(Boolean)
+            .join('\n\n')
+        }
+      }
+    }
+
     if (isDocumentModeEnabled(sessionId)) {
-      const update = extractDocumentUpdate(answer)
+      const update = extractDocumentUpdate(assistantContent)
       if (update) {
         const existing = getSessionDocument(sessionId)
         setSessionDocument(sessionId, {
