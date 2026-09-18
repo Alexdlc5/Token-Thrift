@@ -7,16 +7,16 @@
 // account as the text/image-generation adapters (same free Neuron budget, same stored
 // "accountId:apiToken" key) rather than a second local pipeline.
 //
-// Model: @cf/meta/llama-3.2-11b-vision-instruct — confirmed reachable on the free Neuron
-// allotment (playground-testable with no billing method, per developers.cloudflare.com and
-// the same paid-only denylist providers/cloudflare-workers-ai.ts already tracks; this model
-// isn't on that list). Multimodal request shape (structured `content` array with an
-// `image_url` part) confirmed against developers.cloudflare.com/workers-ai/configuration/
-// open-ai-compatibility/, which documents the /ai/v1/chat/completions endpoint accepting
-// "both string content and array content (structured content parts for multi-modal
-// inputs)" — the standard OpenAI vision shape. Not verified against a live call (no test
-// account here); if the exact field names ever turn out wrong, the error surfaces as a
-// normal failed-fetch, same as every other unverified-until-used adapter in this app.
+// Model: @cf/meta/llama-3.2-11b-vision-instruct, via the NATIVE /ai/run endpoint (not the
+// OpenAI-compatible /ai/v1/chat/completions one the text providers use) — per
+// developers.cloudflare.com/workers-ai/models/llama-3.2-11b-vision-instruct/, this model's
+// documented request shape is `{ messages: [...], image: "data:...;base64,..." }` as a
+// top-level sibling field, not an OpenAI-style `content: [{type:'image_url', ...}]` array.
+//
+// Meta-licensed models also need a one-time per-account acceptance call
+// (`{"prompt":"agree"}` to this same run endpoint) before they'll serve real requests —
+// skipping it is exactly what surfaces as a 403 Forbidden on first use. acceptLicenseAndRetry
+// below does that lazily, on the first 403, so no manual setup step is needed.
 
 import assert from 'node:assert'
 import { parseStoredKey } from '../providers/cloudflare-workers-ai'
@@ -63,35 +63,46 @@ export function parseVisionResponse(content: string): ImageReadResult {
   return { text: '', objects: [], description: cleaned || '(no description returned)' }
 }
 
-export async function readImage(dataUrl: string): Promise<ImageReadResult> {
-  const { accountId, apiToken } = parseStoredKey(getApiKey('cloudflare-workers-ai'))
+function runUrl(accountId: string): string {
+  return `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${MODEL}`
+}
 
-  const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/chat/completions`, {
+async function callVisionModel(accountId: string, apiToken: string, dataUrl: string): Promise<Response> {
+  return fetch(runUrl(accountId), {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiToken}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: MODEL,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: READ_PROMPT },
-            { type: 'image_url', image_url: { url: dataUrl } }
-          ]
-        }
-      ],
+      messages: [{ role: 'user', content: READ_PROMPT }],
+      image: dataUrl,
       max_tokens: 512
     })
   })
+}
+
+export async function readImage(dataUrl: string): Promise<ImageReadResult> {
+  const { accountId, apiToken } = parseStoredKey(getApiKey('cloudflare-workers-ai'))
+
+  let res = await callVisionModel(accountId, apiToken, dataUrl)
+  if (res.status === 403) {
+    // First-ever use of this model on this account — accept the Meta license once, then
+    // retry the real request. If the acceptance call itself fails, the retry below just
+    // surfaces whatever error comes back, same as any other failed read.
+    await fetch(runUrl(accountId), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'agree' })
+    })
+    res = await callVisionModel(accountId, apiToken, dataUrl)
+  }
 
   if (!res.ok) {
     throw new Error(`Image read failed: ${res.status} ${res.statusText}`)
   }
-  const body = (await res.json()) as { choices?: [{ message?: { content?: string } }] }
-  const content = body.choices?.[0]?.message?.content
+  const body = (await res.json()) as { result?: { response?: string } }
+  const content = body.result?.response
   if (!content) throw new Error('Image read failed: empty response')
   return parseVisionResponse(content)
 }

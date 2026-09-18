@@ -82,12 +82,17 @@ const IMAGE_TAG = 'generate_image'
 
 function buildImageGenerationInstruction(): string {
   return [
-    'You cannot generate images directly, but this app can — when the user asks for an ' +
-      'image (or something that clearly calls for one), do not say you are unable to. ' +
-      'Instead, write a single detailed, vivid image-generation prompt describing exactly ' +
-      'what to create, wrapped like this:',
+    'You cannot generate images directly, but this app can — when the user asks you to ' +
+      'CREATE, DRAW, or GENERATE a new image, do not say you are unable to. Instead, write ' +
+      'a single detailed, vivid image-generation prompt describing exactly what to create, ' +
+      'wrapped like this:',
     `<${IMAGE_TAG}>a detailed description of the image to generate</${IMAGE_TAG}>`,
-    'Only use this when an image is actually being requested — never for unrelated replies.'
+    'Only use this when a brand-new image is actually being requested — never for unrelated ' +
+      'replies, and never when the user is instead asking you to describe, analyze, read, or ' +
+      'answer a question about an image or file they already loaded into the document panel. ' +
+      'For that, answer from whatever description of it you were already given above — if ' +
+      'none was given or it says the read failed, say plainly that you cannot see the file, ' +
+      'rather than generating an unrelated image as a substitute.'
   ].join('\n\n')
 }
 
