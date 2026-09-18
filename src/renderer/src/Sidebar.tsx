@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import type { SessionSummary } from '@shared/models'
 import { PROVIDER_LABELS } from './mockData'
+import Resizer from './Resizer'
 import Spinner from './Spinner'
+import { useResizableSize } from './useResizableSize'
 
 interface SidebarProps {
   sessions: SessionSummary[]
@@ -26,6 +28,7 @@ export default function Sidebar({
 }: SidebarProps): React.JSX.Element {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draftTitle, setDraftTitle] = useState('')
+  const [width, resizeWidth] = useResizableSize('tt-sidebar-width', 260, 180, 480)
 
   function startEditing(session: SessionSummary): void {
     setEditingId(session.id)
@@ -40,7 +43,18 @@ export default function Sidebar({
   }
 
   return (
-    <div style={{ width: 260, borderRight: '1px solid #333', display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div
+      style={{
+        position: 'relative',
+        width,
+        flexShrink: 0,
+        borderRight: '1px solid #333',
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%'
+      }}
+    >
+      <Resizer direction="horizontal" edge="right" onResize={resizeWidth} />
       <div style={{ padding: 12, borderBottom: '1px solid #333' }}>
         <button onClick={onNewSession} style={{ width: '100%', padding: 8, cursor: 'pointer' }}>
           + New session

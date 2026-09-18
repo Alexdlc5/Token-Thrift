@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { join } from 'node:path'
 import { IPC } from '@shared/ipc-contract'
 import { getDb } from './db/schema'
@@ -49,6 +49,10 @@ import type { ModelOverrides, ProviderId, TaskRow } from '@shared/models'
 import type { ProviderChatMessage } from './providers/LLMProvider'
 
 function createWindow(): void {
+  // No File/Edit/View/Window/Help bar — this app has no menu commands worth exposing there,
+  // and it was just sitting on top of the UI as unstyled native chrome.
+  Menu.setApplicationMenu(null)
+
   const win = new BrowserWindow({
     width: 1280,
     height: 800,

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { TaskRow } from '@shared/models'
 import { PROVIDER_LABELS } from './mockData'
+import Resizer from './Resizer'
+import { useResizableSize } from './useResizableSize'
 
 // Self-contained: subscribes to window.api directly rather than taking props, so it keeps
 // tracking background tasks (§2.4: "must work even when the user switches sessions")
@@ -9,6 +11,7 @@ export default function TaskMonitorPanel(): React.JSX.Element {
   const [tasks, setTasks] = useState<TaskRow[]>([])
   const [liveText, setLiveText] = useState<Record<string, { answer: string; reasoning: string }>>({})
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [width, resizeWidth] = useResizableSize('tt-task-monitor-width', 300, 220, 600)
 
   useEffect(() => {
     window.api.listTasks().then(setTasks).catch(console.error)
@@ -103,13 +106,16 @@ export default function TaskMonitorPanel(): React.JSX.Element {
   return (
     <div
       style={{
-        width: 300,
+        position: 'relative',
+        width,
+        flexShrink: 0,
         borderLeft: '1px solid #333',
         display: 'flex',
         flexDirection: 'column',
         height: '100%'
       }}
     >
+      <Resizer direction="horizontal" edge="left" onResize={resizeWidth} />
       <div style={{ padding: '10px 12px', borderBottom: '1px solid #333', fontWeight: 600, fontSize: 13 }}>
         Task monitor
       </div>

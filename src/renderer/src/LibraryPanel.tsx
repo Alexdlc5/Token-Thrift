@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { LibraryItem } from '@shared/models'
+import Resizer from './Resizer'
+import { useResizableSize } from './useResizableSize'
 
 interface LibraryPanelProps {
   sessionId: string
@@ -53,6 +55,7 @@ export default function LibraryPanel({ sessionId }: LibraryPanelProps): React.JS
   const [items, setItems] = useState<LibraryItem[]>([])
   const [collapsed, setCollapsed] = useState(false)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [libraryHeight, resizeHeight] = useResizableSize('tt-library-panel-height', 170, 80, 500)
 
   function load(): void {
     window.api.listLibraryItems(sessionId).then(setItems).catch(console.error)
@@ -99,85 +102,88 @@ export default function LibraryPanel({ sessionId }: LibraryPanelProps): React.JS
         </button>
       </div>
       {!collapsed && (
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 12,
-            padding: '4px 12px 12px',
-            maxHeight: 170,
-            overflowY: 'auto',
-            alignContent: 'flex-start'
-          }}
-        >
-          {items.length === 0 && (
-            <div style={{ fontSize: 12, opacity: 0.5, padding: '8px 0' }}>
-              No files yet — loaded or generated images/PDFs show up here.
-            </div>
-          )}
-          {items.map((item, index) => {
-            const { size, color } = libraryVisual(item.sizeBytes)
-            const kindLabel = item.mimeType.startsWith('image/') ? 'IMG' : item.mimeType === 'application/pdf' ? 'PDF' : 'FILE'
-            return (
-              <button
-                key={item.id}
-                onClick={() => handleOpen(item.id)}
-                title={item.fileName}
-                draggable
-                onDragStart={() => setDragIndex(index)}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => {
-                  e.preventDefault()
-                  handleDrop(index)
-                }}
-                onDragEnd={() => setDragIndex(null)}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: 4,
-                  width: 84,
-                  padding: 0,
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'grab',
-                  color: '#eee',
-                  opacity: dragIndex === index ? 0.4 : 1
-                }}
-              >
-                <span
+        <div style={{ position: 'relative' }}>
+          <Resizer direction="vertical" edge="top" onResize={resizeHeight} />
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 12,
+              padding: '4px 12px 12px',
+              maxHeight: libraryHeight,
+              overflowY: 'auto',
+              alignContent: 'flex-start'
+            }}
+          >
+            {items.length === 0 && (
+              <div style={{ fontSize: 12, opacity: 0.5, padding: '8px 0' }}>
+                No files yet — loaded or generated images/PDFs show up here.
+              </div>
+            )}
+            {items.map((item, index) => {
+              const { size, color } = libraryVisual(item.sizeBytes)
+              const kindLabel = item.mimeType.startsWith('image/') ? 'IMG' : item.mimeType === 'application/pdf' ? 'PDF' : 'FILE'
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => handleOpen(item.id)}
+                  title={item.fileName}
+                  draggable
+                  onDragStart={() => setDragIndex(index)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    handleDrop(index)
+                  }}
+                  onDragEnd={() => setDragIndex(null)}
                   style={{
-                    width: size,
-                    height: size,
-                    borderRadius: 8,
-                    backgroundColor: color,
                     display: 'flex',
+                    flexDirection: 'column',
                     alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 10,
-                    fontWeight: 600,
-                    flexShrink: 0
+                    gap: 4,
+                    width: 84,
+                    padding: 0,
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'grab',
+                    color: '#eee',
+                    opacity: dragIndex === index ? 0.4 : 1
                   }}
                 >
-                  {kindLabel}
-                </span>
-                <span
-                  style={{
-                    fontSize: 10,
-                    opacity: 0.75,
-                    textAlign: 'center',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    width: '100%'
-                  }}
-                >
-                  {item.description ? item.description.slice(0, 40) : item.fileName}
-                </span>
-                <span style={{ fontSize: 9, opacity: 0.5 }}>{formatSize(item.sizeBytes)}</span>
-              </button>
-            )
-          })}
+                  <span
+                    style={{
+                      width: size,
+                      height: size,
+                      borderRadius: 8,
+                      backgroundColor: color,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 10,
+                      fontWeight: 600,
+                      flexShrink: 0
+                    }}
+                  >
+                    {kindLabel}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      opacity: 0.75,
+                      textAlign: 'center',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      width: '100%'
+                    }}
+                  >
+                    {item.description ? item.description.slice(0, 40) : item.fileName}
+                  </span>
+                  <span style={{ fontSize: 9, opacity: 0.5 }}>{formatSize(item.sizeBytes)}</span>
+                </button>
+              )
+            })}
+          </div>
         </div>
       )}
     </div>

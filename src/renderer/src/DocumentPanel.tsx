@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { SessionDocument } from '@shared/models'
+import Resizer from './Resizer'
 import Spinner from './Spinner'
+import { useResizableSize } from './useResizableSize'
 
 interface DocumentPanelProps {
   sessionId: string
@@ -8,7 +10,6 @@ interface DocumentPanelProps {
 
 const MAX_FILE_BYTES = 15 * 1024 * 1024
 const SAVE_DEBOUNCE_MS = 600
-const PANEL_HEIGHT = 430 // ~26% taller than the original 340px
 
 // The "working file" panel, shown above the chat input. A text document is editable by both
 // the user (this textarea) and the model (via the <document> response convention in
@@ -23,6 +24,8 @@ export default function DocumentPanel({ sessionId }: DocumentPanelProps): React.
   const [loadingFile, setLoadingFile] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // ~26% taller than the original fixed 340px default.
+  const [panelHeight, resizeHeight] = useResizableSize('tt-document-panel-height', 430, 120, 900)
 
   function load(): void {
     window.api
@@ -147,58 +150,61 @@ export default function DocumentPanel({ sessionId }: DocumentPanelProps): React.
         </button>
       </div>
       {!collapsed && (
-        <div style={{ maxHeight: PANEL_HEIGHT, overflow: 'auto' }}>
-          {!docLoaded && (
-            <div style={{ padding: '4px 12px 12px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, opacity: 0.6 }}>
-              <Spinner size={12} /> Loading document…
-            </div>
-          )}
-          {docLoaded && !doc && (
-            <div style={{ padding: '4px 12px 12px', fontSize: 12, opacity: 0.6 }}>
-              No document yet — start a text document the model can edit, or load an
-              image/PDF to keep as a reference.
-            </div>
-          )}
-          {doc?.kind === 'text' && (
-            <textarea
-              value={draft}
-              onChange={(e) => handleDraftChange(e.target.value)}
-              rows={12}
-              style={{
-                width: '100%',
-                boxSizing: 'border-box',
-                padding: 12,
-                fontFamily: 'inherit',
-                fontSize: 13,
-                border: 'none',
-                resize: 'vertical',
-                backgroundColor: '#1a1a22',
-                color: '#eee'
-              }}
-            />
-          )}
-          {doc?.kind === 'file' && doc.mimeType?.startsWith('image/') && (
-            <img
-              src={doc.content}
-              alt={doc.fileName ?? 'loaded image'}
-              style={{ maxWidth: '100%', maxHeight: PANEL_HEIGHT, display: 'block', objectFit: 'contain' }}
-            />
-          )}
-          {doc?.kind === 'file' && doc.mimeType === 'application/pdf' && (
-            <iframe
-              src={doc.content}
-              title={doc.fileName ?? 'loaded PDF'}
-              style={{ width: '100%', height: PANEL_HEIGHT, border: 'none' }}
-            />
-          )}
-          {doc?.kind === 'file' &&
-            doc.mimeType &&
-            !doc.mimeType.startsWith('image/') &&
-            doc.mimeType !== 'application/pdf' && (
-              <div style={{ padding: '4px 12px 12px', fontSize: 12, opacity: 0.6 }}>
-                Unsupported file type: {doc.mimeType}
+        <div style={{ position: 'relative' }}>
+          <div style={{ maxHeight: panelHeight, overflow: 'auto' }}>
+            {!docLoaded && (
+              <div style={{ padding: '4px 12px 12px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, opacity: 0.6 }}>
+                <Spinner size={12} /> Loading document…
               </div>
             )}
+            {docLoaded && !doc && (
+              <div style={{ padding: '4px 12px 12px', fontSize: 12, opacity: 0.6 }}>
+                No document yet — start a text document the model can edit, or load an
+                image/PDF to keep as a reference.
+              </div>
+            )}
+            {doc?.kind === 'text' && (
+              <textarea
+                value={draft}
+                onChange={(e) => handleDraftChange(e.target.value)}
+                rows={12}
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  padding: 12,
+                  fontFamily: 'inherit',
+                  fontSize: 13,
+                  border: 'none',
+                  resize: 'vertical',
+                  backgroundColor: '#1a1a22',
+                  color: '#eee'
+                }}
+              />
+            )}
+            {doc?.kind === 'file' && doc.mimeType?.startsWith('image/') && (
+              <img
+                src={doc.content}
+                alt={doc.fileName ?? 'loaded image'}
+                style={{ maxWidth: '100%', maxHeight: panelHeight, display: 'block', objectFit: 'contain' }}
+              />
+            )}
+            {doc?.kind === 'file' && doc.mimeType === 'application/pdf' && (
+              <iframe
+                src={doc.content}
+                title={doc.fileName ?? 'loaded PDF'}
+                style={{ width: '100%', height: panelHeight, border: 'none' }}
+              />
+            )}
+            {doc?.kind === 'file' &&
+              doc.mimeType &&
+              !doc.mimeType.startsWith('image/') &&
+              doc.mimeType !== 'application/pdf' && (
+                <div style={{ padding: '4px 12px 12px', fontSize: 12, opacity: 0.6 }}>
+                  Unsupported file type: {doc.mimeType}
+                </div>
+              )}
+          </div>
+          <Resizer direction="vertical" edge="bottom" onResize={resizeHeight} />
         </div>
       )}
     </div>
