@@ -1,6 +1,6 @@
 # Token Thrift
 
-A desktop hub for chatting with free-tier LLMs — one app, eight providers, zero paid API calls unless you explicitly opt in.
+A desktop hub for chatting with free-tier LLMs — one app, ten providers, zero paid API calls unless you explicitly opt in.
 
 Built with Electron, React, and TypeScript. Every provider call streams live, every response is logged in a task monitor, and every API key is encrypted at rest via the OS keychain.
 
@@ -10,11 +10,11 @@ Free-tier access to capable LLMs is scattered across a dozen different consoles,
 
 ## Features
 
-- **Eight free-tier providers behind one interface** — OpenRouter, Groq, Google AI Studio (Gemini), Cerebras, NVIDIA NIM, Hugging Face, Mistral, and Cloudflare Workers AI. Each implements a shared `LLMProvider` interface, so adding a provider is one new file, not a rewrite.
+- **Ten free-tier providers behind one interface** — OpenRouter, Groq, Google AI Studio (Gemini), Cerebras, NVIDIA NIM, Hugging Face, Mistral, Cloudflare Workers AI, Cohere, and Z.ai (GLM). Each implements a shared `LLMProvider` interface, so adding a provider is one new file, not a rewrite.
 - **Live streaming, including reasoning traces.** For models that expose a separate thinking/reasoning channel, it renders distinctly from the final answer instead of getting mixed in.
 - **A real task monitor**, not just a chat log — every request (and any future nested/agentic sub-requests) shows up as a row with live status, token counts, cost, and the exact resolved system prompt that was sent, so you can verify what a toggle actually changed.
 - **Session-level context management.** Conversations carry up to 500K tokens of rolling history; once a session gets close to that cap, the oldest portion is automatically summarized by the model and archived (not deleted — still inspectable, just no longer resent). Every individual request is separately fitted to the *active* model's real context window, whatever that happens to be.
-- **A live document panel** above the chat input — start a text document and let the model revise it turn by turn (a plain response convention, so it works identically across all eight providers with no function-calling support required), or load an image/PDF as a reference.
+- **A live document panel** above the chat input — start a text document and let the model revise it turn by turn (a plain response convention, so it works identically across all ten providers with no function-calling support required), or load an image/PDF as a reference.
 - **Free image generation and image reading**, both via a hosted vision/image model, triggered automatically by conversational intent rather than a separate mode you have to remember to switch into.
 - **A session-scoped file library** — every uploaded or generated file is saved to disk and shown in a grid, sized and colored by file size, one click from opening in whatever your OS treats as the default handler for that file type.
 - **Multiple named API keys per provider**, independently encrypted, with an active-key selector — useful for keeping separate accounts straight, not for working around any single provider's rate limits.

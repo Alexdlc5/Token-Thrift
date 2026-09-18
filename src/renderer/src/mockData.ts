@@ -10,7 +10,9 @@ export const PROVIDER_LABELS: Record<ProviderId, string> = {
   'nvidia-nim': 'NVIDIA NIM',
   huggingface: 'Hugging Face',
   mistral: 'Mistral',
-  'cloudflare-workers-ai': 'Cloudflare Workers AI'
+  'cloudflare-workers-ai': 'Cloudflare Workers AI',
+  cohere: 'Cohere',
+  zhipu: 'Z.ai (GLM)'
 }
 
 export const DEFAULT_OVERRIDES: ModelOverrides = {

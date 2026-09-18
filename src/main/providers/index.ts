@@ -8,5 +8,7 @@ import './nvidia-nim'
 import './huggingface'
 import './mistral'
 import './cloudflare-workers-ai'
+import './cohere'
+import './zhipu'
 
 export { getProvider, listProviders } from './registry'

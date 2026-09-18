@@ -1,7 +1,7 @@
 {
   "name": "token-thrift",
   "version": "1.0.0",
-  "description": "A desktop hub for chatting with free-tier LLMs across eight providers, with live streaming, task monitoring, and session context management.",
+  "description": "A desktop hub for chatting with free-tier LLMs across ten providers, with live streaming, task monitoring, and session context management.",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",

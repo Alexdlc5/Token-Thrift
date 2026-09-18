@@ -9,6 +9,8 @@ export type ProviderId =
   | 'huggingface'
   | 'mistral'
   | 'cloudflare-workers-ai'
+  | 'cohere'
+  | 'zhipu'
 
 export interface ModelInfo {
   providerId: ProviderId
