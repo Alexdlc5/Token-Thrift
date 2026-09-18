@@ -40,11 +40,16 @@ export const IPC = {
     getMode: 'document:getMode',
     setMode: 'document:setMode'
   },
+  library: {
+    list: 'library:list',
+    open: 'library:open'
+  },
   events: {
     taskUpdate: 'event:taskUpdate',
     chatChunk: 'event:chatChunk',
     chatDone: 'event:chatDone',
-    chatError: 'event:chatError'
+    chatError: 'event:chatError',
+    libraryUpdated: 'event:libraryUpdated'
   }
 } as const
 
@@ -64,4 +69,8 @@ export interface ChatStreamError {
   taskId: string
   sessionId: string
   error: string
+}
+
+export interface LibraryUpdated {
+  sessionId: string
 }

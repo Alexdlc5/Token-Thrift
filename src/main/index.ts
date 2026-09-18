@@ -31,6 +31,9 @@ import {
 import { fitHistoryToBudget } from './context-window'
 import { maybeCompressSession } from './context-compression'
 import { cloudflareImageProvider } from './image-providers/cloudflare-image'
+import { readImage } from './image-providers/cloudflare-vision'
+import { saveToLibrary, getLibraryItemPath } from './library'
+import { listLibraryItems } from './db/repository'
 import {
   addApiKey,
   getActiveKeyId,
@@ -162,6 +165,12 @@ async function runChatTask(
             mimeType: image.mimeType,
             fileName: 'generated-image.jpg'
           })
+          try {
+            saveToLibrary(sessionId, image.dataUrl, image.mimeType, 'generated-image.jpg', imageRequest.prompt)
+            win?.webContents.send(IPC.events.libraryUpdated, { sessionId })
+          } catch (libraryErr) {
+            console.error('Failed to save generated image to library:', libraryErr)
+          }
           assistantContent = assistantContent || '_Generated an image — see the panel above._'
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
@@ -206,6 +215,48 @@ async function runChatTask(
     emitTaskUpdate(win, failed)
     win?.webContents.send(IPC.events.chatError, { taskId: task.id, sessionId, error })
   }
+}
+
+// Runs after a file's already saved as the session's document and the IPC call has
+// returned — the vision read is a real network round trip (a few seconds), and blocking
+// setDocumentFile() on it would reintroduce exactly the "looks frozen" problem the rest of
+// this pass fixed. Images get read (structured description/text/objects folded into a
+// system message); every file (image or PDF) gets a library entry either way.
+async function handleFileSideEffects(
+  sessionId: string,
+  dataUrl: string,
+  mimeType: string,
+  fileName: string,
+  win: BrowserWindow | null
+): Promise<void> {
+  let description: string | null = null
+
+  if (mimeType.startsWith('image/')) {
+    try {
+      const read = await readImage(dataUrl)
+      description = read.description || null
+      const summary = [
+        `[Image loaded: ${fileName}]`,
+        read.description ? `Description: ${read.description}` : '',
+        read.text ? `Text found in image: ${read.text}` : '',
+        read.objects.length ? `Notable elements: ${read.objects.join(', ')}` : ''
+      ]
+        .filter(Boolean)
+        .join('\n')
+      addMessage(sessionId, 'system', summary)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      addMessage(sessionId, 'system', `[Image loaded: ${fileName}] (Could not read image contents: ${message})`)
+    }
+  }
+
+  try {
+    saveToLibrary(sessionId, dataUrl, mimeType, fileName, description)
+  } catch (err) {
+    console.error('Failed to save file to library:', err)
+  }
+
+  win?.webContents.send(IPC.events.libraryUpdated, { sessionId })
 }
 
 function registerIpcHandlers(): void {
@@ -299,14 +350,27 @@ function registerIpcHandlers(): void {
       fileName: fileName !== undefined ? fileName : (existing?.fileName ?? null)
     })
   })
-  ipcMain.handle(IPC.document.setFile, async (_e, sessionId, content, mimeType, fileName) => {
+  ipcMain.handle(IPC.document.setFile, async (event, sessionId, content, mimeType, fileName) => {
     if (content.length > MAX_DOCUMENT_FILE_BYTES) {
       throw new Error('File is too large (max 15MB)')
     }
-    return setSessionDocument(sessionId, { kind: 'file', content, mimeType, fileName })
+    const saved = setSessionDocument(sessionId, { kind: 'file', content, mimeType, fileName })
+
+    const win = BrowserWindow.fromWebContents(event.sender)
+    void handleFileSideEffects(sessionId, content, mimeType, fileName, win)
+
+    return saved
   })
   ipcMain.handle(IPC.document.getMode, async (_e, sessionId) => isDocumentModeEnabled(sessionId))
   ipcMain.handle(IPC.document.setMode, async (_e, sessionId, enabled) => setDocumentMode(sessionId, enabled))
+
+  ipcMain.handle(IPC.library.list, async (_e, sessionId) => listLibraryItems(sessionId))
+  ipcMain.handle(IPC.library.open, async (_e, id) => {
+    const path = getLibraryItemPath(id)
+    if (!path) throw new Error(`No library item with id "${id}"`)
+    const result = await shell.openPath(path)
+    if (result) throw new Error(`Could not open file: ${result}`)
+  })
 }
 
 // A second launch (e.g. double-clicking the desktop shortcut while a previous instance is

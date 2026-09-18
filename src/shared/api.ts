@@ -1,6 +1,7 @@
-import type { ChatStreamChunk, ChatStreamDone, ChatStreamError } from './ipc-contract'
+import type { ChatStreamChunk, ChatStreamDone, ChatStreamError, LibraryUpdated } from './ipc-contract'
 import type {
   ChatMessage,
+  LibraryItem,
   ModelInfo,
   ModelOverrides,
   ProviderId,
@@ -63,8 +64,13 @@ export interface TokenThriftApi {
   /** Whether the model is instructed to edit the text document via its response convention. */
   setDocumentMode(sessionId: string, enabled: boolean): Promise<void>
 
+  listLibraryItems(sessionId: string): Promise<LibraryItem[]>
+  /** Opens a library file with the OS default handler (shell.openPath). */
+  openLibraryItem(id: string): Promise<void>
+
   onTaskUpdate(cb: (task: TaskRow) => void): () => void
   onChatChunk(cb: (evt: ChatStreamChunk) => void): () => void
   onChatDone(cb: (evt: ChatStreamDone) => void): () => void
   onChatError(cb: (evt: ChatStreamError) => void): () => void
+  onLibraryUpdated(cb: (evt: LibraryUpdated) => void): () => void
 }

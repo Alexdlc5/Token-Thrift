@@ -10,6 +10,7 @@ import type {
   ChatMessage,
   ChatRole,
   DocumentKind,
+  LibraryItem,
   ProviderId,
   SessionDocument,
   SessionSummary,
@@ -349,4 +350,71 @@ export function listTasks(): TaskRow[] {
 export function getTask(id: string): TaskRow | undefined {
   const row = conn().prepare(`SELECT * FROM tasks WHERE id = ?`).get(id) as unknown as TaskDbRow | undefined
   return row ? mapTask(row) : undefined
+}
+
+// ---- library (session-scoped saved files: uploads + generated images) ----
+
+interface LibraryItemRow {
+  id: string
+  session_id: string
+  file_name: string
+  file_path: string
+  mime_type: string
+  size_bytes: number
+  description: string | null
+  created_at: number
+}
+
+function mapLibraryItem(row: LibraryItemRow): LibraryItem {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    fileName: row.file_name,
+    mimeType: row.mime_type,
+    sizeBytes: row.size_bytes,
+    description: row.description,
+    createdAt: row.created_at
+  }
+}
+
+export function addLibraryItem(input: {
+  sessionId: string
+  fileName: string
+  filePath: string
+  mimeType: string
+  sizeBytes: number
+  description: string | null
+}): LibraryItem {
+  const id = randomUUID()
+  const createdAt = Date.now()
+  conn()
+    .prepare(
+      `INSERT INTO library_items (id, session_id, file_name, file_path, mime_type, size_bytes, description, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(id, input.sessionId, input.fileName, input.filePath, input.mimeType, input.sizeBytes, input.description, createdAt)
+  return {
+    id,
+    sessionId: input.sessionId,
+    fileName: input.fileName,
+    mimeType: input.mimeType,
+    sizeBytes: input.sizeBytes,
+    description: input.description,
+    createdAt
+  }
+}
+
+export function listLibraryItems(sessionId: string): LibraryItem[] {
+  const rows = conn()
+    .prepare(`SELECT * FROM library_items WHERE session_id = ? ORDER BY created_at DESC`)
+    .all(sessionId) as unknown as LibraryItemRow[]
+  return rows.map(mapLibraryItem)
+}
+
+/** Internal-only (file_path never leaves main) — used to resolve what to hand shell.openPath(). */
+export function getLibraryItemPath(id: string): string | undefined {
+  const row = conn().prepare(`SELECT file_path FROM library_items WHERE id = ?`).get(id) as
+    | { file_path: string }
+    | undefined
+  return row?.file_path
 }

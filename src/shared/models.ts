@@ -103,3 +103,19 @@ export interface SessionDocument {
   fileName: string | null
   updatedAt: number
 }
+
+/**
+ * One file saved into a session's on-disk library (userData/library/<sessionId>/...) —
+ * every loaded reference file and every generated image lands here, in addition to (not
+ * instead of) whatever's currently in the single-slot document panel. `description` is the
+ * vision-read summary for an uploaded image, or the original prompt for a generated one.
+ */
+export interface LibraryItem {
+  id: string
+  sessionId: string
+  fileName: string
+  mimeType: string
+  sizeBytes: number
+  description: string | null
+  createdAt: number
+}

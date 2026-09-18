@@ -7,6 +7,7 @@ import NewSessionPicker from './NewSessionPicker'
 import TaskMonitorPanel from './TaskMonitorPanel'
 import UsageTracker from './UsageTracker'
 import DocumentPanel from './DocumentPanel'
+import LibraryPanel from './LibraryPanel'
 import { DEFAULT_OVERRIDES } from './mockData'
 
 const ALL_PROVIDERS: ProviderId[] = [
@@ -176,10 +177,21 @@ export default function App(): React.JSX.Element {
       ])
     })
 
+    // A library update (file loaded, image generated) may have added a system message
+    // outside of any chat task (e.g. the vision-read summary after an upload) — refresh
+    // that session's messages the same way a chatDone would.
+    const offLibrary = window.api.onLibraryUpdated((evt) => {
+      window.api
+        .listMessages(evt.sessionId)
+        .then((msgs) => replaceSessionMessages(evt.sessionId, msgs))
+        .catch(console.error)
+    })
+
     return () => {
       offChunk()
       offDone()
       offError()
+      offLibrary()
     }
   }, [])
 
@@ -357,6 +369,7 @@ export default function App(): React.JSX.Element {
             />
           )}
         </div>
+        {view === 'chat' && activeSession && <LibraryPanel sessionId={activeSession.id} />}
       </div>
       {showMonitor && <TaskMonitorPanel />}
       {pickerMode && (
