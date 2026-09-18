@@ -30,11 +30,21 @@ import { getApiKey } from '../secure-store'
 
 const MODEL = '@cf/meta/llama-3.2-11b-vision-instruct'
 
+// A short 1-2 sentence description isn't enough to answer specific follow-up questions later
+// ("what's in the top-right?", "how many cows?") since the chat model never sees the actual
+// pixels — only this text, once, at load time. So the read itself has to front-load that
+// detail: explicit per-region layout and colors, and exact counts, not just a vibe summary.
 const READ_PROMPT =
-  'Look at this image and respond with ONLY a JSON object (no markdown code fences, no ' +
-  'commentary before or after) in exactly this shape: {"text": "<any readable text in the ' +
-  'image, verbatim, empty string if none>", "objects": ["<notable object or element>", ...], ' +
-  '"description": "<a one or two sentence natural-language description of the image>"}'
+  'Examine this image thoroughly and respond with ONLY a JSON object (no markdown code ' +
+  'fences, no commentary before or after) in exactly this shape: {"text": "<any readable ' +
+  'text in the image, verbatim, empty string if none>", "objects": ["<notable object or ' +
+  'element — include an exact count if there is more than one, e.g. \\"3 cows\\" not just ' +
+  '\\"cows\\">", ...], "description": "<a detailed, multi-sentence description written so ' +
+  'someone could answer specific follow-up questions about the image without ever seeing ' +
+  'it. Explicitly cover: what occupies the top-left, top-right, bottom-left, bottom-right, ' +
+  'and center of the frame; the dominant color(s) in each of those regions; what is in the ' +
+  'foreground versus background; the exact count of any people, animals, or repeated ' +
+  'objects; and any other distinguishing visual detail.>"}'
 
 export interface ImageReadResult {
   text: string
@@ -90,7 +100,7 @@ async function callVisionModel(accountId: string, apiToken: string, dataUrl: str
           ]
         }
       ],
-      max_tokens: 512
+      max_tokens: 1024
     })
   })
 }

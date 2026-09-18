@@ -91,7 +91,9 @@ export default function ChatPane({ session, messages, onSend, isPending }: ChatP
         </span>
       </div>
       <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {messages.map((msg) => (
+        {messages
+          .filter((msg) => !(msg.role === 'system' && msg.content.startsWith('[Image loaded:')))
+          .map((msg) => (
           <div
             key={msg.id}
             style={{

@@ -79,10 +79,14 @@ function buildReferenceFileInstruction(doc: SessionDocument): string {
   const kind = doc.mimeType?.startsWith('image/') ? 'image' : doc.mimeType === 'application/pdf' ? 'PDF' : 'file'
   return [
     `The user has loaded a reference ${kind} into the document panel above, named "${name}".`,
-    'You cannot see it directly, but if it was read successfully, an earlier system message ' +
-      "in this conversation summarizes its contents — use that to answer the user's questions " +
-      "about it. If that message says the read failed, say plainly that you can't see the " +
-      'file, rather than claiming you have no ability to view uploaded files at all.'
+    'An earlier system message in this conversation already read it in detail — layout by ' +
+      'region, colors, exact counts of people/animals/objects, any text found — and that ' +
+      `description is your only source of truth for it. When asked about the ${kind} ` +
+      '(what\'s in a corner, what color something is, how many of something there are, etc.), ' +
+      "answer directly and confidently from that description, the way you would if you'd " +
+      'looked at it yourself — do not hedge with phrases like "based on the description" or ' +
+      '"I was told", and do not say you are unable to see images. Only fall back to saying ' +
+      "you can't see it if that earlier message itself says the read failed."
   ].join('\n\n')
 }
 

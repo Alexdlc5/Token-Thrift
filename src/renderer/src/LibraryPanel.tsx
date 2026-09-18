@@ -127,7 +127,7 @@ export default function LibraryPanel({ sessionId }: LibraryPanelProps): React.JS
                 <button
                   key={item.id}
                   onClick={() => handleOpen(item.id)}
-                  title={item.fileName}
+                  title={item.description ? `${item.fileName}\n\n${item.description}` : item.fileName}
                   draggable
                   onDragStart={() => setDragIndex(index)}
                   onDragOver={(e) => e.preventDefault()}
