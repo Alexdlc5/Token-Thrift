@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { SessionDocument } from '@shared/models'
+import Spinner from './Spinner'
 
 interface DocumentPanelProps {
   sessionId: string
@@ -7,6 +8,7 @@ interface DocumentPanelProps {
 
 const MAX_FILE_BYTES = 15 * 1024 * 1024
 const SAVE_DEBOUNCE_MS = 600
+const PANEL_HEIGHT = 430 // ~26% taller than the original 340px
 
 // The "working file" panel, shown above the chat input. A text document is editable by both
 // the user (this textarea) and the model (via the <document> response convention in
@@ -14,9 +16,11 @@ const SAVE_DEBOUNCE_MS = 600
 // nothing in this app can generate binary files.
 export default function DocumentPanel({ sessionId }: DocumentPanelProps): React.JSX.Element {
   const [doc, setDoc] = useState<SessionDocument | null>(null)
+  const [docLoaded, setDocLoaded] = useState(false)
   const [modeEnabled, setModeEnabled] = useState(false)
   const [draft, setDraft] = useState('')
   const [collapsed, setCollapsed] = useState(false)
+  const [loadingFile, setLoadingFile] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
@@ -28,10 +32,12 @@ export default function DocumentPanel({ sessionId }: DocumentPanelProps): React.
         setDraft(d?.kind === 'text' ? d.content : '')
       })
       .catch(console.error)
+      .finally(() => setDocLoaded(true))
     window.api.getDocumentMode(sessionId).then(setModeEnabled).catch(console.error)
   }
 
   useEffect(() => {
+    setDocLoaded(false)
     load()
     return () => clearTimeout(saveTimer.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -69,6 +75,7 @@ export default function DocumentPanel({ sessionId }: DocumentPanelProps): React.
       alert('File is too large (max 15MB)')
       return
     }
+    setLoadingFile(true)
     const reader = new FileReader()
     reader.onload = () => {
       window.api
@@ -80,6 +87,11 @@ export default function DocumentPanel({ sessionId }: DocumentPanelProps): React.
           window.api.setDocumentMode(sessionId, false).catch(console.error)
         })
         .catch((err: unknown) => alert(err instanceof Error ? err.message : String(err)))
+        .finally(() => setLoadingFile(false))
+    }
+    reader.onerror = () => {
+      alert('Could not read that file')
+      setLoadingFile(false)
     }
     reader.readAsDataURL(file)
   }
@@ -121,15 +133,27 @@ export default function DocumentPanel({ sessionId }: DocumentPanelProps): React.
           onChange={handleFilePicked}
           style={{ display: 'none' }}
         />
-        <button onClick={() => fileInputRef.current?.click()}>Load image/PDF</button>
+        <button onClick={() => fileInputRef.current?.click()} disabled={loadingFile}>
+          Load image/PDF
+        </button>
+        {loadingFile && (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, opacity: 0.7 }}>
+            <Spinner size={12} /> Loading file…
+          </span>
+        )}
         {!doc && <button onClick={handleStartTextDoc}>Start text document</button>}
         <button onClick={() => setCollapsed((v) => !v)} style={{ marginLeft: 'auto' }}>
           {collapsed ? 'Expand' : 'Collapse'}
         </button>
       </div>
       {!collapsed && (
-        <div style={{ maxHeight: 340, overflow: 'auto' }}>
-          {!doc && (
+        <div style={{ maxHeight: PANEL_HEIGHT, overflow: 'auto' }}>
+          {!docLoaded && (
+            <div style={{ padding: '4px 12px 12px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, opacity: 0.6 }}>
+              <Spinner size={12} /> Loading document…
+            </div>
+          )}
+          {docLoaded && !doc && (
             <div style={{ padding: '4px 12px 12px', fontSize: 12, opacity: 0.6 }}>
               No document yet — start a text document the model can edit, or load an
               image/PDF to keep as a reference.
@@ -157,14 +181,14 @@ export default function DocumentPanel({ sessionId }: DocumentPanelProps): React.
             <img
               src={doc.content}
               alt={doc.fileName ?? 'loaded image'}
-              style={{ maxWidth: '100%', display: 'block' }}
+              style={{ maxWidth: '100%', maxHeight: PANEL_HEIGHT, display: 'block', objectFit: 'contain' }}
             />
           )}
           {doc?.kind === 'file' && doc.mimeType === 'application/pdf' && (
             <iframe
               src={doc.content}
               title={doc.fileName ?? 'loaded PDF'}
-              style={{ width: '100%', height: 340, border: 'none' }}
+              style={{ width: '100%', height: PANEL_HEIGHT, border: 'none' }}
             />
           )}
           {doc?.kind === 'file' &&

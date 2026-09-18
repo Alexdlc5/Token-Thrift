@@ -22,11 +22,37 @@ function readModule(filename: string): string {
   return readFileSync(join(resourcesDir(), 'prompt-modules', filename), 'utf8').trim()
 }
 
+/**
+ * Pulls a `<tag>...</tag>` block out of a response. Also handles the tag being opened but
+ * never closed — a weaker free model cut off mid-generation, or one that just doesn't
+ * follow the closing-tag convention precisely, would otherwise leave the raw `<tag>...`
+ * text sitting in the visible chat message forever. Treating "opened, never closed" as
+ * "everything after the opening tag is the content" is strictly better than that.
+ */
+function extractTaggedBlock(text: string, tag: string): { inner: string; remainder: string } | null {
+  const closedMatch = text.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`))
+  if (closedMatch && closedMatch.index !== undefined) {
+    const inner = closedMatch[1].trim()
+    const stitched = text.slice(0, closedMatch.index) + text.slice(closedMatch.index + closedMatch[0].length)
+    // Removing the block leaves a gap where it sat — collapse runs of 3+ newlines (i.e.
+    // more than one blank line) down to a single paragraph break instead of showing it.
+    return { inner, remainder: stitched.replace(/\n{3,}/g, '\n\n').trim() }
+  }
+
+  const openMatch = text.match(new RegExp(`<${tag}>([\\s\\S]*)$`))
+  if (openMatch && openMatch.index !== undefined) {
+    const inner = openMatch[1].trim()
+    if (!inner) return null
+    return { inner, remainder: text.slice(0, openMatch.index).trim() }
+  }
+
+  return null
+}
+
 // Document editing (the "working file" panel) is a plain response convention, not a
 // provider feature — works identically across all eight providers since it's just text the
 // model is asked to emit, no function-calling/tool-use API required.
 const DOCUMENT_TAG = 'document'
-const DOCUMENT_BLOCK_RE = /<document>([\s\S]*?)<\/document>/
 
 function buildDocumentInstruction(doc: SessionDocument | null): string {
   const title = doc?.fileName?.trim() || 'Untitled document'
@@ -45,21 +71,14 @@ function buildDocumentInstruction(doc: SessionDocument | null): string {
 export function extractDocumentUpdate(
   responseText: string
 ): { content: string; remainder: string } | null {
-  const match = responseText.match(DOCUMENT_BLOCK_RE)
-  if (!match || match.index === undefined) return null
-  const content = match[1].trim()
-  const stitched = responseText.slice(0, match.index) + responseText.slice(match.index + match[0].length)
-  // Removing the block leaves a gap where it sat — collapse runs of 3+ newlines (i.e. more
-  // than one blank line) down to a single paragraph break instead of showing it.
-  const remainder = stitched.replace(/\n{3,}/g, '\n\n').trim()
-  return { content, remainder }
+  const result = extractTaggedBlock(responseText, DOCUMENT_TAG)
+  return result ? { content: result.inner, remainder: result.remainder } : null
 }
 
 // Image generation: same convention pattern as the document block. No chat provider here
 // can generate images itself, so the model is told to hand off a prompt instead of just
 // apologizing — main/index.ts catches the tag and calls image-providers/cloudflare-image.ts.
 const IMAGE_TAG = 'generate_image'
-const IMAGE_BLOCK_RE = /<generate_image>([\s\S]*?)<\/generate_image>/
 
 function buildImageGenerationInstruction(): string {
   return [
@@ -76,12 +95,8 @@ function buildImageGenerationInstruction(): string {
 export function extractImageGenerationRequest(
   responseText: string
 ): { prompt: string; remainder: string } | null {
-  const match = responseText.match(IMAGE_BLOCK_RE)
-  if (!match || match.index === undefined) return null
-  const prompt = match[1].trim()
-  const stitched = responseText.slice(0, match.index) + responseText.slice(match.index + match[0].length)
-  const remainder = stitched.replace(/\n{3,}/g, '\n\n').trim()
-  return { prompt, remainder }
+  const result = extractTaggedBlock(responseText, IMAGE_TAG)
+  return result ? { prompt: result.inner, remainder: result.remainder } : null
 }
 
 // Some free/weaker models are fine-tuned on agentic tool-calling data and emit their own
@@ -151,6 +166,22 @@ if (require.main === module) {
   )
   assert.strictEqual(imageWithCommentary?.prompt, 'a cyberpunk cat')
   assert.strictEqual(imageWithCommentary?.remainder, 'Sure, here you go!\n\nLet me know what you think.')
+
+  // The model opened the tag but the response ended before closing it (cut off, or the
+  // model just never learned to close it) — must not leave the raw tag visible.
+  const unclosedImage = extractImageGenerationRequest(
+    '<generate_image>A crisp, glossy red apple on a dark wooden table, soft daylight'
+  )
+  assert.deepStrictEqual(unclosedImage, {
+    prompt: 'A crisp, glossy red apple on a dark wooden table, soft daylight',
+    remainder: ''
+  })
+  const unclosedDocument = extractDocumentUpdate('Here is the draft:\n\n<document>\nJane Doe\nEngineer')
+  assert.strictEqual(unclosedDocument?.content, 'Jane Doe\nEngineer')
+  assert.strictEqual(unclosedDocument?.remainder, 'Here is the draft:')
+  // An opening tag with literally nothing after it isn't a real request — don't treat an
+  // empty string as content.
+  assert.strictEqual(extractImageGenerationRequest('thinking about it... <generate_image>'), null)
 
   assert.strictEqual(sanitizeAssistantText('a perfectly normal reply'), 'a perfectly normal reply')
   assert.strictEqual(

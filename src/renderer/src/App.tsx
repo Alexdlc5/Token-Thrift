@@ -29,11 +29,15 @@ type PickerMode = 'new' | 'switch' | null
 
 export default function App(): React.JSX.Element {
   const [sessions, setSessions] = useState<SessionSummary[]>([])
+  const [sessionsLoaded, setSessionsLoaded] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [models, setModels] = useState<ModelInfo[]>([])
+  const [modelsLoaded, setModelsLoaded] = useState(false)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [view, setView] = useState<View>('chat')
   const [pickerMode, setPickerMode] = useState<PickerMode>(null)
+  const [creatingSession, setCreatingSession] = useState(false)
+  const [pendingSessionIds, setPendingSessionIds] = useState<Set<string>>(new Set())
   const [showMonitor, setShowMonitor] = useState(true)
   const [apiKeysByProvider, setApiKeysByProvider] = useState<Record<ProviderId, StoredKeyInfo[]>>(
     emptyRecord<StoredKeyInfo[]>([])
@@ -82,8 +86,16 @@ export default function App(): React.JSX.Element {
 
   // Initial load: sessions, models, and every provider's saved keys/allow-paid status.
   useEffect(() => {
-    window.api.listSessions().then(setSessions).catch(console.error)
-    window.api.listModels().then(setModels).catch(console.error)
+    window.api
+      .listSessions()
+      .then(setSessions)
+      .catch(console.error)
+      .finally(() => setSessionsLoaded(true))
+    window.api
+      .listModels()
+      .then(setModels)
+      .catch(console.error)
+      .finally(() => setModelsLoaded(true))
     refreshProviderStatus()
   }, [])
 
@@ -97,9 +109,20 @@ export default function App(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSessionId])
 
+  function clearPending(sessionId: string): void {
+    setPendingSessionIds((prev) => {
+      if (!prev.has(sessionId)) return prev
+      const next = new Set(prev)
+      next.delete(sessionId)
+      return next
+    })
+  }
+
   // Live streaming events from main, for the whole app's lifetime (not just the active session).
   useEffect(() => {
     const offChunk = window.api.onChatChunk((evt) => {
+      // First real content for this task — the "thinking..." indicator can stop now.
+      clearPending(evt.sessionId)
       setMessages((prev) => {
         const existing = prev.find((m) => m.id === evt.taskId)
         if (existing) {
@@ -127,6 +150,7 @@ export default function App(): React.JSX.Element {
     })
 
     const offDone = window.api.onChatDone((evt) => {
+      clearPending(evt.sessionId)
       window.api
         .listMessages(evt.sessionId)
         .then((msgs) => replaceSessionMessages(evt.sessionId, msgs))
@@ -134,13 +158,18 @@ export default function App(): React.JSX.Element {
     })
 
     const offError = window.api.onChatError((evt) => {
+      clearPending(evt.sessionId)
+      const isRateLimit = /\b429\b/.test(evt.error)
+      const content = isRateLimit
+        ? `Error: ${evt.error}\n\n_This looks like a rate limit — try switching to a different saved key for this provider (or another provider) in Settings._`
+        : `Error: ${evt.error}`
       setMessages((prev) => [
         ...prev,
         {
           id: `error-${evt.taskId}`,
           sessionId: evt.sessionId,
           role: 'system',
-          content: `Error: ${evt.error}`,
+          content,
           createdAt: Date.now(),
           compressed: false
         }
@@ -178,6 +207,8 @@ export default function App(): React.JSX.Element {
   }
 
   function handlePickModel(model: ModelInfo): void {
+    setCreatingSession(true)
+
     if (pickerMode === 'switch' && activeSessionId) {
       window.api
         .updateSessionModel(activeSessionId, model.providerId, model.modelId)
@@ -191,7 +222,10 @@ export default function App(): React.JSX.Element {
         })
         .then((msgs) => replaceSessionMessages(activeSessionId, msgs))
         .catch(console.error)
-        .finally(() => setPickerMode(null))
+        .finally(() => {
+          setCreatingSession(false)
+          setPickerMode(null)
+        })
       return
     }
 
@@ -200,10 +234,13 @@ export default function App(): React.JSX.Element {
       .then((session) => {
         setSessions((prev) => [session, ...prev])
         setActiveSessionId(session.id)
-        setPickerMode(null)
         setView('chat')
       })
       .catch(console.error)
+      .finally(() => {
+        setCreatingSession(false)
+        setPickerMode(null)
+      })
   }
 
   function handleSend(content: string): void {
@@ -218,7 +255,9 @@ export default function App(): React.JSX.Element {
       compressed: false
     }
     setMessages((prev) => [...prev, optimisticUser])
+    setPendingSessionIds((prev) => new Set(prev).add(sessionId))
     window.api.sendMessage(sessionId, content, activeOverrides).catch((err: unknown) => {
+      clearPending(sessionId)
       setMessages((prev) => [
         ...prev,
         {
@@ -264,6 +303,7 @@ export default function App(): React.JSX.Element {
     >
       <Sidebar
         sessions={sessions}
+        loading={!sessionsLoaded}
         activeSessionId={activeSessionId}
         onSelect={handleSelectSession}
         onRename={handleRenameSession}
@@ -296,7 +336,12 @@ export default function App(): React.JSX.Element {
         {view === 'chat' && activeSession && <DocumentPanel sessionId={activeSession.id} />}
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
           {view === 'chat' ? (
-            <ChatPane session={activeSession} messages={activeMessages} onSend={handleSend} />
+            <ChatPane
+              session={activeSession}
+              messages={activeMessages}
+              onSend={handleSend}
+              isPending={activeSessionId ? pendingSessionIds.has(activeSessionId) : false}
+            />
           ) : (
             <SettingsScreen
               apiKeysByProvider={apiKeysByProvider}
@@ -315,7 +360,13 @@ export default function App(): React.JSX.Element {
       </div>
       {showMonitor && <TaskMonitorPanel />}
       {pickerMode && (
-        <NewSessionPicker models={models} onPick={handlePickModel} onCancel={() => setPickerMode(null)} />
+        <NewSessionPicker
+          models={models}
+          loading={!modelsLoaded}
+          creating={creatingSession}
+          onPick={handlePickModel}
+          onCancel={() => setPickerMode(null)}
+        />
       )}
     </div>
   )

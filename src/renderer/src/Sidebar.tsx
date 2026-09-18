@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import type { SessionSummary } from '@shared/models'
 import { PROVIDER_LABELS } from './mockData'
+import Spinner from './Spinner'
 
 interface SidebarProps {
   sessions: SessionSummary[]
+  loading: boolean
   activeSessionId: string | null
   onSelect: (id: string) => void
   onRename: (id: string, title: string) => void
@@ -14,6 +16,7 @@ interface SidebarProps {
 
 export default function Sidebar({
   sessions,
+  loading,
   activeSessionId,
   onSelect,
   onRename,
@@ -44,7 +47,14 @@ export default function Sidebar({
         </button>
       </div>
       <div style={{ flex: 1, overflowY: 'auto' }}>
-        {sessions.map((session) => (
+        {loading ? (
+          <div style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, opacity: 0.7 }}>
+            <Spinner /> Loading sessions…
+          </div>
+        ) : sessions.length === 0 ? (
+          <div style={{ padding: 16, fontSize: 13, opacity: 0.6 }}>No sessions yet — start one above.</div>
+        ) : (
+          sessions.map((session) => (
           <div
             key={session.id}
             onClick={() => onSelect(session.id)}
@@ -115,7 +125,8 @@ export default function Sidebar({
               </button>
             </div>
           </div>
-        ))}
+          ))
+        )}
       </div>
     </div>
   )
