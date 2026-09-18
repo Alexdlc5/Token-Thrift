@@ -226,6 +226,21 @@ export function setSessionOverrides(sessionId: string, overrides: ModelOverrides
   conn().prepare(`UPDATE sessions SET overrides_json = ? WHERE id = ?`).run(JSON.stringify(overrides), sessionId)
 }
 
+/** The chat input's unsent text for this session — saved only at a couple of specific
+ * moments (opening Settings, closing the window), not on every keystroke, so switching away
+ * and back (including across an app restart) doesn't lose what was half-typed. Empty string,
+ * not null, once anything has ever been saved — null only means "never saved here". */
+export function getSessionDraft(sessionId: string): string | null {
+  const row = conn().prepare(`SELECT draft_text FROM sessions WHERE id = ?`).get(sessionId) as
+    | { draft_text: string | null }
+    | undefined
+  return row?.draft_text ?? null
+}
+
+export function setSessionDraft(sessionId: string, text: string): void {
+  conn().prepare(`UPDATE sessions SET draft_text = ? WHERE id = ?`).run(text, sessionId)
+}
+
 /** Permanently removes a session and everything under it — irreversible, unlike archiving. */
 export function deleteSession(id: string): void {
   const db = conn()

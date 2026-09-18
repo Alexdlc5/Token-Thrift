@@ -11,6 +11,10 @@ interface ChatPaneProps {
   /** True from the moment a message is sent until the first response chunk arrives — the
    * gap where nothing else on screen shows anything is happening. */
   isPending: boolean
+  /** Controlled by App.tsx (not local state) so it survives switching to Settings and back,
+   * and so App.tsx can flush it to disk on the moments that matter. */
+  draft: string
+  onDraftChange: (text: string) => void
 }
 
 function ThinkingIndicator(): React.JSX.Element {
@@ -29,8 +33,14 @@ function ThinkingIndicator(): React.JSX.Element {
   )
 }
 
-export default function ChatPane({ session, messages, onSend, isPending }: ChatPaneProps): React.JSX.Element {
-  const [draft, setDraft] = useState('')
+export default function ChatPane({
+  session,
+  messages,
+  onSend,
+  isPending,
+  draft,
+  onDraftChange
+}: ChatPaneProps): React.JSX.Element {
   // null = editing a fresh draft; otherwise an index into promptHistory being browsed.
   const [historyIndex, setHistoryIndex] = useState<number | null>(null)
   const [draftBeforeHistory, setDraftBeforeHistory] = useState('')
@@ -54,16 +64,16 @@ export default function ChatPane({ session, messages, onSend, isPending }: ChatP
       if (historyIndex === null) setDraftBeforeHistory(draft)
       const nextIndex = historyIndex === null ? 0 : Math.min(historyIndex + 1, promptHistory.length - 1)
       setHistoryIndex(nextIndex)
-      setDraft(promptHistory[nextIndex])
+      onDraftChange(promptHistory[nextIndex])
     } else {
       if (historyIndex === null) return
       if (historyIndex === 0) {
         setHistoryIndex(null)
-        setDraft(draftBeforeHistory)
+        onDraftChange(draftBeforeHistory)
       } else {
         const nextIndex = historyIndex - 1
         setHistoryIndex(nextIndex)
-        setDraft(promptHistory[nextIndex])
+        onDraftChange(promptHistory[nextIndex])
       }
     }
   }
@@ -72,7 +82,6 @@ export default function ChatPane({ session, messages, onSend, isPending }: ChatP
     const content = draft.trim()
     if (!content) return
     onSend(content)
-    setDraft('')
     setHistoryIndex(null)
   }
 
@@ -129,7 +138,7 @@ export default function ChatPane({ session, messages, onSend, isPending }: ChatP
         <input
           value={draft}
           onChange={(e) => {
-            setDraft(e.target.value)
+            onDraftChange(e.target.value)
             if (historyIndex !== null) setHistoryIndex(null)
           }}
           onKeyDown={(e) => {

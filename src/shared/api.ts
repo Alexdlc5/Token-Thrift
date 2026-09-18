@@ -63,6 +63,12 @@ export interface TokenThriftApi {
 
   listTasks(): Promise<TaskRow[]>
 
+  /** The chat input's unsent text for this session — null if never saved here. Only meant to
+   * be called at a few specific moments (opening Settings, the window closing), not on every
+   * keystroke — see App.tsx. */
+  getSessionDraft(sessionId: string): Promise<string | null>
+  setSessionDraft(sessionId: string, text: string): Promise<void>
+
   getDocument(sessionId: string): Promise<SessionDocument | null>
   /** User- or model-authored edit to the session's text document. */
   setDocumentText(sessionId: string, content: string, fileName?: string): Promise<SessionDocument>

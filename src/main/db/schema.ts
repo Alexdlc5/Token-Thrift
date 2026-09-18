@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   document_file_name TEXT,
   document_updated_at INTEGER,
   document_mode INTEGER NOT NULL DEFAULT 0,
-  overrides_json TEXT
+  overrides_json TEXT,
+  draft_text TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -86,7 +87,8 @@ const COLUMN_MIGRATIONS: string[] = [
   'ALTER TABLE sessions ADD COLUMN document_mode INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE library_items ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0',
   "ALTER TABLE library_items ADD COLUMN item_kind TEXT NOT NULL DEFAULT 'file'",
-  'ALTER TABLE sessions ADD COLUMN overrides_json TEXT'
+  'ALTER TABLE sessions ADD COLUMN overrides_json TEXT',
+  'ALTER TABLE sessions ADD COLUMN draft_text TEXT'
 ]
 
 export function applyColumnMigrations(database: DatabaseSync): void {
@@ -141,6 +143,7 @@ if (require.main === module) {
   assert.ok(libraryCols.includes('sort_order'), 'sort_order column added to an old-shape library_items table')
   assert.ok(libraryCols.includes('item_kind'), 'item_kind column added to an old-shape library_items table')
   assert.ok(sessionCols.includes('overrides_json'), 'overrides_json column added to an old-shape sessions table')
+  assert.ok(sessionCols.includes('draft_text'), 'draft_text column added to an old-shape sessions table')
   assert.strictEqual(
     oldShapeDb.prepare('SELECT content FROM messages WHERE id = ?').get('m1')?.content,
     'hello',

@@ -55,6 +55,9 @@ const api: TokenThriftApi = {
 
   listTasks: () => ipcRenderer.invoke(IPC.task.list),
 
+  getSessionDraft: (sessionId) => ipcRenderer.invoke(IPC.draft.get, sessionId),
+  setSessionDraft: (sessionId, text) => ipcRenderer.invoke(IPC.draft.set, sessionId, text),
+
   getDocument: (sessionId) => ipcRenderer.invoke(IPC.document.get, sessionId),
   setDocumentText: (sessionId, content, fileName) =>
     ipcRenderer.invoke(IPC.document.setText, sessionId, content, fileName),

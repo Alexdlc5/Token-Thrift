@@ -39,6 +39,10 @@ export default function App(): React.JSX.Element {
     emptyRecord(false)
   )
   const [overridesBySession, setOverridesBySession] = useState<Record<string, ModelOverrides>>({})
+  // The chat input's unsent text, per session — kept in memory on every keystroke (cheap),
+  // flushed to disk only at specific moments (opening Settings, the window closing), not
+  // continuously, since a draft is low-stakes compared to what already gets saved eagerly.
+  const [draftBySession, setDraftBySession] = useState<Record<string, string>>({})
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
   const activeMessages = messages.filter((m) => m.sessionId === activeSessionId)
@@ -112,6 +116,44 @@ export default function App(): React.JSX.Element {
       .catch(console.error)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSessionId])
+
+  // Hydrate this session's saved draft once, the first time it's opened — restores whatever
+  // was half-typed the last time the window closed.
+  useEffect(() => {
+    if (!activeSessionId || draftBySession[activeSessionId] !== undefined) return
+    window.api
+      .getSessionDraft(activeSessionId)
+      .then((saved) => {
+        if (saved) setDraftBySession((prev) => ({ ...prev, [activeSessionId]: saved }))
+      })
+      .catch(console.error)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId])
+
+  function handleDraftChange(text: string): void {
+    if (!activeSessionId) return
+    setDraftBySession((prev) => ({ ...prev, [activeSessionId]: text }))
+  }
+
+  // Flushes the active session's draft to disk — called at the two moments that matter
+  // (opening Settings, the window closing), not on every keystroke.
+  function flushActiveDraft(): void {
+    if (!activeSessionId) return
+    window.api.setSessionDraft(activeSessionId, draftBySession[activeSessionId] ?? '').catch(console.error)
+  }
+
+  // Re-registered whenever the draft or active session changes so the listener always closes
+  // over the current value — window-level, so it fires for the OS close button too.
+  useEffect(() => {
+    window.addEventListener('beforeunload', flushActiveDraft)
+    return () => window.removeEventListener('beforeunload', flushActiveDraft)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId, draftBySession])
+
+  function handleOpenSettings(): void {
+    flushActiveDraft()
+    setView('settings')
+  }
 
   function clearPending(sessionId: string): void {
     setPendingSessionIds((prev) => {
@@ -282,6 +324,10 @@ export default function App(): React.JSX.Element {
   function handleSend(content: string): void {
     if (!activeSessionId) return
     const sessionId = activeSessionId
+    // The sent text is no longer "unsent" — clear the draft locally and on disk so a crash
+    // right after sending doesn't resurrect it as a stale draft on next launch.
+    setDraftBySession((prev) => ({ ...prev, [sessionId]: '' }))
+    window.api.setSessionDraft(sessionId, '').catch(console.error)
     const optimisticUser: ChatMessage = {
       id: `local-${Date.now()}`,
       sessionId,
@@ -358,7 +404,7 @@ export default function App(): React.JSX.Element {
           <button onClick={() => setView('chat')} disabled={view === 'chat'}>
             Chat
           </button>
-          <button onClick={() => setView('settings')} disabled={view === 'settings'}>
+          <button onClick={handleOpenSettings} disabled={view === 'settings'}>
             Settings
           </button>
           {view === 'chat' && activeSession && (
@@ -383,6 +429,8 @@ export default function App(): React.JSX.Element {
               messages={activeMessages}
               onSend={handleSend}
               isPending={activeSessionId ? pendingSessionIds.has(activeSessionId) : false}
+              draft={activeSessionId ? (draftBySession[activeSessionId] ?? '') : ''}
+              onDraftChange={handleDraftChange}
             />
           ) : (
             <SettingsScreen

@@ -15,6 +15,7 @@ import {
   deleteSession,
   findLibraryLinkByName,
   getSessionDocument,
+  getSessionDraft,
   getSessionOverrides,
   getTask,
   isDocumentModeEnabled,
@@ -30,6 +31,7 @@ import {
   setDocumentMode,
   setSessionArchived,
   setSessionDocument,
+  setSessionDraft,
   setSessionOverrides,
   updateSessionModel,
   updateTask
@@ -190,6 +192,14 @@ assert.deepStrictEqual(
   { imageGeneration: false },
   'a later save fully replaces the previous overrides, same as the renderer sending its already-merged object'
 )
+
+// --- session draft (unsent chat input text) ---
+
+assert.strictEqual(getSessionDraft(session.id), null, 'never saved here yet')
+setSessionDraft(session.id, 'half-typed message')
+assert.strictEqual(getSessionDraft(session.id), 'half-typed message')
+setSessionDraft(session.id, '')
+assert.strictEqual(getSessionDraft(session.id), '', "saving an empty draft (message was sent/cleared) isn't the same as never having saved one")
 
 // --- library reorder ---
 

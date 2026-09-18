@@ -35,6 +35,10 @@ export const IPC = {
   task: {
     list: 'task:list'
   },
+  draft: {
+    get: 'draft:get',
+    set: 'draft:set'
+  },
   system: {
     pickFolder: 'system:pickFolder',
     checkWorkingDir: 'system:checkWorkingDir'

@@ -12,6 +12,7 @@ import {
   findLibraryLinkByName,
   getSession,
   getSessionDocument,
+  getSessionDraft,
   getSessionOverrides,
   isDocumentModeEnabled,
   listMessages,
@@ -23,6 +24,7 @@ import {
   setDocumentMode,
   setSessionArchived,
   setSessionDocument,
+  setSessionDraft,
   setSessionOverrides,
   updateSessionModel,
   updateTask
@@ -560,6 +562,11 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.system.checkWorkingDir, async (_e, path: string) => checkWorkingDirSize(path))
 
   ipcMain.handle(IPC.task.list, async () => listTasks())
+
+  // Saved only at specific moments (opening Settings, the window closing) — see App.tsx —
+  // not on every keystroke, so this is a plain get/set, no debouncing needed on this side.
+  ipcMain.handle(IPC.draft.get, async (_e, sessionId: string) => getSessionDraft(sessionId))
+  ipcMain.handle(IPC.draft.set, async (_e, sessionId: string, text: string) => setSessionDraft(sessionId, text))
 
   // Data-URL uploads land here as a full string over IPC — cap it so a huge file doesn't
   // bloat the SQLite settings row indefinitely (base64 inflates ~33% over the raw bytes).
