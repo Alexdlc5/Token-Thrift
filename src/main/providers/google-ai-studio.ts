@@ -23,6 +23,7 @@ import type {
 } from './LLMProvider'
 import { getAllowPaid, getApiKey } from '../secure-store'
 import { registerProvider } from './registry'
+import { parseSseStream, type ByteReader } from './sse'
 
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 const MODELS_URL = `${API_BASE}/models`
@@ -104,12 +105,6 @@ function toGeminiRequest(messages: ProviderChatMessage[]): {
     : { contents }
 }
 
-// Minimal shape of the reader we need, so the SSE parser can be fed either a real
-// `response.body.getReader()` or a fixture reader in the self-check below.
-interface ByteReader {
-  read(): Promise<{ done: boolean; value?: Uint8Array }>
-}
-
 interface GeminiPart {
   text?: string
   thought?: boolean // set on "thinking" chunks when the request enabled includeThoughts
@@ -124,19 +119,22 @@ interface GeminiStreamChunk {
   }
 }
 
+// Gemini's `alt=sse` stream has no `[DONE]`-style sentinel of its own — done is always false
+// here, relying entirely on the HTTP stream closing (parseSseStream's own reader.read() done
+// check), unlike the OpenAI-shaped providers that watch for a literal `data: [DONE]` line.
 /** One `data: {...}` line from the `alt=sse` stream, parsed into zero or more stream parts. */
-function parseEvent(eventBlock: string): ChatStreamPart[] {
+function parseEvent(eventBlock: string): { done: boolean; parts: ChatStreamPart[] } {
   const dataLine = eventBlock.split('\n').find((line) => line.startsWith('data:'))
-  if (!dataLine) return [] // keep-alive/blank blocks
+  if (!dataLine) return { done: false, parts: [] } // keep-alive/blank blocks
 
   const payload = dataLine.slice(5).trim()
-  if (!payload) return []
+  if (!payload) return { done: false, parts: [] }
 
   let json: GeminiStreamChunk
   try {
     json = JSON.parse(payload)
   } catch {
-    return [] // ponytail: malformed chunk skipped, not fatal
+    return { done: false, parts: [] } // ponytail: malformed chunk skipped, not fatal
   }
 
   const parts: ChatStreamPart[] = []
@@ -152,22 +150,7 @@ function parseEvent(eventBlock: string): ChatStreamPart[] {
       completionTokens: usage.candidatesTokenCount
     })
   }
-  return parts
-}
-
-async function* parseSseStream(reader: ByteReader): AsyncGenerator<ChatStreamPart> {
-  const decoder = new TextDecoder()
-  let buffer = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) return
-    buffer += decoder.decode(value, { stream: true })
-    const blocks = buffer.split('\n\n')
-    buffer = blocks.pop() ?? ''
-    for (const block of blocks) {
-      for (const part of parseEvent(block)) yield part
-    }
-  }
+  return { done: false, parts }
 }
 
 class GoogleAiStudioProvider implements LLMProvider {
@@ -222,7 +205,7 @@ class GoogleAiStudioProvider implements LLMProvider {
       throw new Error(`Google AI Studio chat request failed: ${res.status} ${res.statusText}`)
     }
 
-    yield* parseSseStream(res.body.getReader())
+    yield* parseSseStream(res.body.getReader(), parseEvent)
   }
 }
 
@@ -279,7 +262,7 @@ if (require.main === module) {
     }
 
     const parts: ChatStreamPart[] = []
-    for await (const part of parseSseStream(fakeReader)) parts.push(part)
+    for await (const part of parseSseStream(fakeReader, parseEvent)) parts.push(part)
 
     assert.deepStrictEqual(parts, [
       { type: 'reasoning', delta: 'thinking...' },

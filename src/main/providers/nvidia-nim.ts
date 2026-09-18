@@ -21,6 +21,7 @@ import type {
 } from './LLMProvider'
 import { getAllowPaid, getApiKey } from '../secure-store'
 import { registerProvider } from './registry'
+import { parseSseStream, type ByteReader } from './sse'
 
 const BASE_URL = 'https://integrate.api.nvidia.com/v1'
 const MODELS_URL = `${BASE_URL}/models`
@@ -95,12 +96,6 @@ async function getCachedModels(forceRefresh = false): Promise<ModelInfo[]> {
   return models
 }
 
-// Minimal shape of the reader we need, so the SSE parser can be fed either a real
-// `response.body.getReader()` or a fixture reader in the self-check below.
-interface ByteReader {
-  read(): Promise<{ done: boolean; value?: Uint8Array }>
-}
-
 /** One `data: {...}` line, parsed into zero or more stream parts, plus the DONE sentinel. */
 function parseEvent(eventBlock: string): { done: boolean; parts: ChatStreamPart[] } {
   const dataLine = eventBlock.split('\n').find((line) => line.startsWith('data:'))
@@ -132,23 +127,6 @@ function parseEvent(eventBlock: string): { done: boolean; parts: ChatStreamPart[
     })
   }
   return { done: false, parts }
-}
-
-async function* parseSseStream(reader: ByteReader): AsyncGenerator<ChatStreamPart> {
-  const decoder = new TextDecoder()
-  let buffer = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) return
-    buffer += decoder.decode(value, { stream: true })
-    const blocks = buffer.split('\n\n')
-    buffer = blocks.pop() ?? ''
-    for (const block of blocks) {
-      const { done: isDone, parts } = parseEvent(block)
-      for (const part of parts) yield part
-      if (isDone) return
-    }
-  }
 }
 
 class NvidiaNimProvider implements LLMProvider {
@@ -204,7 +182,7 @@ class NvidiaNimProvider implements LLMProvider {
       throw new Error(`NVIDIA NIM chat request failed: ${res.status} ${res.statusText}`)
     }
 
-    yield* parseSseStream(res.body.getReader())
+    yield* parseSseStream(res.body.getReader(), parseEvent)
   }
 }
 
@@ -289,7 +267,7 @@ if (require.main === module) {
     }
 
     const parts: ChatStreamPart[] = []
-    for await (const part of parseSseStream(fakeReader)) parts.push(part)
+    for await (const part of parseSseStream(fakeReader, parseEvent)) parts.push(part)
 
     assert.deepStrictEqual(parts, [
       { type: 'reasoning', delta: 'Let me think...' },
